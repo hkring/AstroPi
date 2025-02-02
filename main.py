@@ -1,6 +1,7 @@
 from exif import Image
 from datetime import datetime
 from logzero import logger
+import math
 
 def get_time(image):
     with open(image, 'rb') as image_file:
@@ -33,6 +34,23 @@ def get_gps_DMS_String(image: Image) -> str:
         lonref = img.get('gps_longitude_ref')
         return "{0}°{1}\'{2}\"{3}, {4}°{5}\'{6}\"{7}".format(int(lat[0]), int(lat[1]), lat[2], latref, int(lon[0]), int(lon[1]), lon[2], lonref)
 
+# camera properties
+widthpx = 4056
+focallength = 5 # focal length in [mm]
+sensorwidth = 6.17 # sendor width [mm]
+beta = math.atan((sensorwidth/2)/focallength) # vertex angle [radian]
+
+def calculateGSDvalue(altidue: int) -> int:
+    '''
+    Calculates the ground sampling distance (GSD)
+
+    Args altitude (int): ISS orbits between 370000 - 460000 [meter]
+
+    Return GSD (int): scale factor [cm/pixel]   
+    '''
+    grounddistance = 2 * math.tan(beta) * altidue * 100
+    return int(grounddistance/widthpx)
+
 #----------------------------------------------------- Main Logic -------------------------------------------------------
 
 #Holger comment: use two photos located in the same folder as your main.py file
@@ -55,5 +73,8 @@ logger.debug(f"{image_2} coordinates {coordinate}")
 #Holger comment: open image files and read timestamp meta data  
 time_difference = get_time_difference(image_1,image_2)
 logger.debug(f"The time difference between two photos is {time_difference} seconds")
+#Holger comment: assuming an altitude of 435250  
+gds = calculateGSDvalue(435250)
+logger.debug(f"GSD Scaling factor is {gds}")
 
 logger.debug('30 seconds')
