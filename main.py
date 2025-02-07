@@ -3,28 +3,67 @@ from datetime import datetime
 from logzero import logger
 import math
 
-def get_time(image):
-    with open(image, 'rb') as image_file:
-        img = Image(image_file)
-        time_str = img.get("datetime_original")
-        time = datetime.strptime(time_str, '%Y:%m:%d %H:%M:%S')
-    return time
+R = 6378.137 #Radius earth in km
 
-def get_time_difference(image_1, image_2):
-    time_1 = get_time(image_1)
-    time_2 = get_time(image_2)
-    time_difference = time_2 - time_1
-    return time_difference.seconds
+def get_sign(refchar: str) -> float:
+    '''
+    Convert a direction character degree minutes seconds (DMS) coordinates 
 
-def get_gps_DMS_String(image: Image) -> str:
+    Args:
+        drection (str): N, E, S or W
+
+    Returns: 
+        signed (float): -1.0 for N or E, 1.0 for S or W       
+    '''
+    match refchar:
+        case "N" | "E":
+            return 1.0
+        case "S" | "W":
+            return -1.0
+        case _:
+            return 1.0 
+
+def convert_to_degree(dms: tuple[float]) -> float:
+    '''
+    Convert degree minutes seconds (DMS) to decimal coordinates
+
+    Args:
+        dms (tuple[float]): degree, minute, seconds
+
+    Returns:
+        decimal (float): coordinate not signed     
+    '''
+    return dms[0] + (dms[1] / 60) + (dms[2] / 3600)
+
+def get_signedLatLonCoordinate(image: str) -> tuple:
     """
-    Read Image Meta data and returns location coordinates as Degree, Minutes, Seconds (DMS)
+    Read Image Meta data and returns signed decimal coordinates
 
     Args:
         image: file path to Exif Image
 
     Returns:
-        DMS (string): such as 37°25'19.07"N, 122°05'06.24"W     
+        decimal (tuble[floor]): {lat, lon}
+    """
+    with open(image, 'rb') as image_file:
+        img = Image(image_file)
+        lat = img.get('gps_latitude')
+        latref = img.get('gps_latitude_ref')
+        lon = img.get('gps_longitude')
+        lonref = img.get('gps_longitude_ref')
+        signedlat = get_sign(latref) * convert_to_degree(lat)
+        signedlon = get_sign(lonref) * convert_to_degree(lon)
+        return tuple({signedlat, signedlon})
+
+def get_DMScoordinates(image: str) -> str:
+    """
+    Read Image Meta data and returns degree, minutes, seconds (DMS) coordinates
+
+    Args:
+        image: file path to Exif Image
+
+    Returns:
+       dms (string): such as 37°25'19.07"N, 122°05'06.24"W     
     """
     with open(image, 'rb') as image_file:
         img = Image(image_file)
@@ -34,47 +73,56 @@ def get_gps_DMS_String(image: Image) -> str:
         lonref = img.get('gps_longitude_ref')
         return "{0}°{1}\'{2}\"{3}, {4}°{5}\'{6}\"{7}".format(int(lat[0]), int(lat[1]), lat[2], latref, int(lon[0]), int(lon[1]), lon[2], lonref)
 
-# camera properties
-widthpx = 4056
-focallength = 5 # focal length in [mm]
-sensorwidth = 6.17 # sendor width [mm]
-beta = math.atan((sensorwidth/2)/focallength) # vertex angle [radian]
 
-def calculateGSDvalue(altidue: int) -> int:
+def convert_degreeToRadian(degree: float) -> float:
     '''
-    Calculates the ground sampling distance (GSD)
+    Convert an angle from degree to radiant units
 
-    Args altitude (int): ISS orbits between 370000 - 460000 [meter]
+    Args:
+        degree (float): 0 - 360  
 
-    Return GSD (int): scale factor [cm/pixel]   
+    Returns:
+        radian (float): 0 - 2*pi
     '''
-    grounddistance = 2 * math.tan(beta) * altidue * 100
-    return int(grounddistance/widthpx)
+    return degree * math.pi / 180
 
+def calculate_haversine(pointA: tuple[float], pointB: tuple[float]) -> float:
+    """
+    Calculate the angular distance between two points on a surface of a sphere
+
+    Args:
+        pointA (tuble(float)): start point
+        pointB (tuble(float)): end point
+
+    return distance (float)     
+    """ 
+    dlat = convert_degreeToRadian(pointB[0]) - convert_degreeToRadian(pointA[0])
+    dlon = convert_degreeToRadian(pointB[1]) - convert_degreeToRadian(pointA[1])
+    a = 0.5 - math.cos(dlat)/2 + math.cos(convert_degreeToRadian(pointA[0])) * math.cos(convert_degreeToRadian(pointB[0])) * (1-math.cos(dlon))/2
+    c = 2* math.asin(math.sqrt(a))
+    return R*c 
 #----------------------------------------------------- Main Logic -------------------------------------------------------
 
-#Holger comment: use two photos located in the same folder as your main.py file
-image_1 = 'test/photo_0683.jpg'
-image_2 = 'test/photo_0684.jpg'
+# Holger comment: Defining a data structure for each image instead of multiple loose variables
+# Images -> List (Dictonary)
+#   + imagepath (string)    - file path 
+#   + latlon (tuple[floor]) - decimal coordinate
+#   + distance (floor)      - angular distance between two points   
+images = [
+    {"imagepath":  "test/photo_0683.jpg"},
+    {"imagepath":  "test/photo_0684.jpg"}]
 
-starttime = datetime.now().timestamp()
-flag = 0
-logger.debug('Start looping')
-while datetime.now().timestamp()- starttime < 30:
-    # Holger comment : round timestamp to compare with an integer 
-    if flag == 0 and round( datetime.now().timestamp() - starttime) == 15:
-        logger.debug('15 seconds')
-        coordinate = get_gps_DMS_String(image_1)
-        logger.debug(f"{image_1} coordinates {coordinate}")        
-        flag = 1
+# Holger comment: Loop over all images and extract decimal coordinates
+for img in images:
+    img.update({"latlon": get_signedLatLonCoordinate(img.get("imagepath"))})
 
-coordinate = get_gps_DMS_String(image_2)
-logger.debug(f"{image_2} coordinates {coordinate}")
-#Holger comment: open image files and read timestamp meta data  
-time_difference = get_time_difference(image_1,image_2)
-logger.debug(f"The time difference between two photos is {time_difference} seconds")
-#Holger comment: assuming an altitude of 435250  
-gds = calculateGSDvalue(435250)
-logger.debug(f"GSD Scaling factor is {gds}")
+# Holger comment: Caclulate angular distance. Start the loop with the second image but use the previous image[i-1] to extract the start point 
+for i in range(1, len(images), 1):
+    distance = calculate_haversine(images[i-1].get("latlon"), images[i].get("latlon"))  
+    images[i].update({"distance": distance})
 
-logger.debug('30 seconds')
+# Holger comment: Loop over agian all images
+for img in images:
+    distance = img.get("distance")
+    logger.debug(f"The ground distance between two coordinate is {distance} in km")
+    print(img)
