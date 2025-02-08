@@ -5,6 +5,19 @@ import math
 
 R = 6378.137 #Radius earth in km
 
+def get_time(image):
+    with open(image, 'rb') as image_file:
+        img = Image(image_file)
+        time_str = img.get("datetime_original")
+        time = datetime.strptime(time_str, '%Y:%m:%d %H:%M:%S')
+    return time
+
+def get_time_difference(image_1, image_2):
+    time_1 = get_time(image_1)
+    time_2 = get_time(image_2)
+    time_difference = time_2 - time_1
+    return time_difference.seconds
+
 def get_sign(refchar: str) -> float:
     '''
     Convert a direction character degree minutes seconds (DMS) coordinates 
@@ -109,20 +122,41 @@ def calculate_haversine(pointA: tuple[float], pointB: tuple[float]) -> float:
 #   + latlon (tuple[floor]) - decimal coordinate
 #   + distance (floor)      - angular distance between two points   
 images = [
+    {"imagepath":  "test/photo_0673.jpg"},
+    {"imagepath":  "test/photo_0674.jpg"},
+    {"imagepath":  "test/photo_0675.jpg"},
+    {"imagepath":  "test/photo_0676.jpg"},
+    {"imagepath":  "test/photo_0678.jpg"},
+    {"imagepath":  "test/photo_0679.jpg"},
+    {"imagepath":  "test/photo_0680.jpg"},
+    {"imagepath":  "test/photo_0681.jpg"},
+    {"imagepath":  "test/photo_0682.jpg"},
     {"imagepath":  "test/photo_0683.jpg"},
-    {"imagepath":  "test/photo_0684.jpg"}]
+    {"imagepath":  "test/photo_0684.jpg"},
+    {"imagepath":  "test/photo_0685.jpg"},
+    {"imagepath":  "test/photo_0687.jpg"}
+    ]
 
 # Holger comment: Loop over all images and extract decimal coordinates
 for img in images:
+    img.update({"datetime_original":get_time(img.get("imagepath"))})
     img.update({"latlon": get_signedLatLonCoordinate(img.get("imagepath"))})
 
 # Holger comment: Caclulate angular distance. Start the loop with the second image but use the previous image[i-1] to extract the start point 
 for i in range(1, len(images), 1):
     distance = calculate_haversine(images[i-1].get("latlon"), images[i].get("latlon"))  
     images[i].update({"distance": distance})
+    timedifference = get_time_difference(images[i-1].get("imagepath"), images[i].get("imagepath"))
+    images[i].update({"timedifference": timedifference})
+    speed = distance / timedifference
+    images[i].update({"speed": speed})
 
 # Holger comment: Loop over agian all images
 for img in images:
     distance = img.get("distance")
     logger.debug(f"The ground distance between two coordinate is {distance} in km")
-    print(img)
+    timedifference = img.get("timedifference")
+    logger.debug(f"The time difference between two photos is {timedifference} in seconds")
+    speed = img.get("speed")
+    logger.debug(f"The calculated speed is {speed} in kmps")
+    #print(img) 
