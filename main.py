@@ -48,7 +48,7 @@ def convert_to_degree(dms: tuple[float]) -> float:
     '''
     return dms[0] + (dms[1] / 60) + (dms[2] / 3600)
 
-def get_signedLatLonCoordinate(image: str) -> tuple:
+def get_signedLatCoordinate(image: str) -> float:
     """
     Read Image Meta data and returns signed decimal coordinates
 
@@ -62,12 +62,26 @@ def get_signedLatLonCoordinate(image: str) -> tuple:
         img = Image(image_file)
         lat = img.get('gps_latitude')
         latref = img.get('gps_latitude_ref')
+        signedlat = get_sign(latref) * convert_to_degree(lat)
+        return signedlat
+
+def get_signedLonCoordinate(image: str) -> float:
+    """
+    Read Image Meta data and returns signed decimal coordinates
+
+    Args:
+        image: file path to Exif Image
+
+    Returns:
+        decimal (tuble[floor]): {lat, lon}
+    """
+    with open(image, 'rb') as image_file:
+        img = Image(image_file)
         lon = img.get('gps_longitude')
         lonref = img.get('gps_longitude_ref')
-        signedlat = get_sign(latref) * convert_to_degree(lat)
         signedlon = get_sign(lonref) * convert_to_degree(lon)
-        return tuple({signedlat, signedlon})
-
+        return signedlon
+    
 def get_DMScoordinates(image: str) -> str:
     """
     Read Image Meta data and returns degree, minutes, seconds (DMS) coordinates
@@ -140,11 +154,14 @@ images = [
 # Holger comment: Loop over all images and extract decimal coordinates
 for img in images:
     img.update({"datetime_original":get_time(img.get("imagepath"))})
-    img.update({"latlon": get_signedLatLonCoordinate(img.get("imagepath"))})
+    img.update({"latitude": get_signedLatCoordinate(img.get("imagepath"))})
+    img.update({"longitude": get_signedLonCoordinate(img.get("imagepath"))})
 
 # Holger comment: Caclulate angular distance. Start the loop with the second image but use the previous image[i-1] to extract the start point 
 for i in range(1, len(images), 1):
-    distance = calculate_haversine(images[i-1].get("latlon"), images[i].get("latlon"))  
+    pointA = tuple({images[i-1].get("latitude"), images[i-1].get("longitude")})
+    pointB = tuple({images[i].get("latitude"), images[i].get("longitude")})
+    distance = calculate_haversine(pointA,pointB)  
     images[i].update({"distance": distance})
     timedifference = get_time_difference(images[i-1].get("imagepath"), images[i].get("imagepath"))
     images[i].update({"timedifference": timedifference})
@@ -153,10 +170,10 @@ for i in range(1, len(images), 1):
 
 # Holger comment: Loop over agian all images
 for img in images:
-    distance = img.get("distance")
-    logger.debug(f"The ground distance between two coordinate is {distance} in km")
-    timedifference = img.get("timedifference")
-    logger.debug(f"The time difference between two photos is {timedifference} in seconds")
-    speed = img.get("speed")
-    logger.debug(f"The calculated speed is {speed} in kmps")
-    #print(img) 
+    #distance = img.get("distance")
+    #logger.debug(f"The ground distance between two coordinate is {distance} in km")
+    #timedifference = img.get("timedifference")
+    #logger.debug(f"The time difference between two photos is {timedifference} in seconds")
+    #speed = img.get("speed")
+    #logger.debug(f"The calculated speed is {speed} in kmps")
+    print('{:.14f}'.format(img.get("latitude")), '{:.14f}'.format(img.get("longitude"))) 
