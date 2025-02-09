@@ -53,10 +53,10 @@ def get_signedLatCoordinate(image: str) -> float:
     Read Image Meta data and returns signed decimal coordinates
 
     Args:
-        image: file path to Exif Image
+        image (string): file path to Exif Image
 
     Returns:
-        decimal (tuble[floor]): {lat, lon}
+        decimal (floor): latitude
     """
     with open(image, 'rb') as image_file:
         img = Image(image_file)
@@ -70,10 +70,10 @@ def get_signedLonCoordinate(image: str) -> float:
     Read Image Meta data and returns signed decimal coordinates
 
     Args:
-        image: file path to Exif Image
+        image (string): file path to Exif Image
 
     Returns:
-        decimal (tuble[floor]): {lat, lon}
+        decimal (floor): longitude 
     """
     with open(image, 'rb') as image_file:
         img = Image(image_file)
@@ -113,7 +113,7 @@ def convert_degreeToRadian(degree: float) -> float:
     '''
     return degree * math.pi / 180
 
-def calculate_haversine(pointA: tuple[float], pointB: tuple[float]) -> float:
+def calculate_haversine(pointAlat: float, pointAlon: float, pointBlat: float, pintBlon: float) -> float:
     """
     Calculate the angular distance between two points on a surface of a sphere
 
@@ -123,9 +123,9 @@ def calculate_haversine(pointA: tuple[float], pointB: tuple[float]) -> float:
 
     return distance (float)     
     """ 
-    dlat = convert_degreeToRadian(pointB[0]) - convert_degreeToRadian(pointA[0])
-    dlon = convert_degreeToRadian(pointB[1]) - convert_degreeToRadian(pointA[1])
-    a = 0.5 - math.cos(dlat)/2 + math.cos(convert_degreeToRadian(pointA[0])) * math.cos(convert_degreeToRadian(pointB[0])) * (1-math.cos(dlon))/2
+    dlat = convert_degreeToRadian(pointBlat) - convert_degreeToRadian(pointAlat)
+    dlon = convert_degreeToRadian(pintBlon) - convert_degreeToRadian(pointAlon)
+    a = 0.5 - math.cos(dlat)/2 + math.cos(convert_degreeToRadian(pointAlat)) * math.cos(convert_degreeToRadian(pointBlat)) * (1-math.cos(dlon))/2
     c = 2* math.asin(math.sqrt(a))
     return R*c 
 #----------------------------------------------------- Main Logic -------------------------------------------------------
@@ -159,21 +159,31 @@ for img in images:
 
 # Holger comment: Caclulate angular distance. Start the loop with the second image but use the previous image[i-1] to extract the start point 
 for i in range(1, len(images), 1):
-    pointA = tuple({images[i-1].get("latitude"), images[i-1].get("longitude")})
-    pointB = tuple({images[i].get("latitude"), images[i].get("longitude")})
-    distance = calculate_haversine(pointA,pointB)  
+    pointAlat = images[i-1].get("latitude")
+    pointAlon = images[i-1].get("longitude")
+    pointBlat = images[i].get("latitude")
+    pointBlon = images[i].get("longitude")
+    
+    distance = calculate_haversine(pointAlat, pointAlon, pointBlat, pointBlon)  
     images[i].update({"distance": distance})
     timedifference = get_time_difference(images[i-1].get("imagepath"), images[i].get("imagepath"))
     images[i].update({"timedifference": timedifference})
     speed = distance / timedifference
     images[i].update({"speed": speed})
 
-# Holger comment: Loop over agian all images
+# Holger comment: path decimal coordinates
 for img in images:
-    #distance = img.get("distance")
-    #logger.debug(f"The ground distance between two coordinate is {distance} in km")
-    #timedifference = img.get("timedifference")
-    #logger.debug(f"The time difference between two photos is {timedifference} in seconds")
-    #speed = img.get("speed")
-    #logger.debug(f"The calculated speed is {speed} in kmps")
     print('{:.14f}'.format(img.get("latitude")), '{:.14f}'.format(img.get("longitude"))) 
+
+# Holger comment: calculate total path length 
+k = 'distance' # key
+seg_distance = list(i[k] for i in images if k in i)
+
+# Holger comment: sum the distance of ALL segments
+total = sum(seg_distance)
+logger.debug(f"The path distance is {total} in km") 
+
+k = 'speed' # key
+seg_speed = list(i[k] for i in images if k in i)
+avg_spee = sum(seg_speed) / len(seg_speed)
+logger.debug(f"The average speed is {avg_spee} in kmps") 
