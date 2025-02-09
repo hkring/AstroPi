@@ -183,6 +183,7 @@ seg_distance = list(i[k] for i in images if k in i)
 total = sum(seg_distance)
 logger.debug(f"The path distance is {total} in km") 
 
+# Holger comment: average ground speed
 k = 'speed' # key
 seg_speed = list(i[k] for i in images if k in i)
 avg_spee = sum(seg_speed) / len(seg_speed)
