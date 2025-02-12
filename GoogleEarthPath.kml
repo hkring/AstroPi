@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Paths</name>
+	<visibility>0</visibility>
+    <description>AstroPi path testing geo coordinates</description>
+    <Style id="yellowLineGreenPoly">
+      <LineStyle>
+        <color>7f00ffff</color>
+        <width>4</width>
+      </LineStyle>
+      <PolyStyle>
+        <color>7f00ff00</color>
+      </PolyStyle>
+    </Style>
+    <Placemark>
+      <name>Absolute Extruded</name>
+      <description>Transparent green wall with yellow outlines</description>
+      <styleUrl>#yellowLineGreenPoly</styleUrl>
+      <LineString>
+        <extrude>1</extrude>
+        <tessellate>1</tessellate>
+        <coordinates> 
+			-72.33880555555555,-40.36341666666666,0
+			-71.76469444444444,-40.69552777777778,0
+			-71.17666666666668,-41.02875000000000,0
+			-70.60261111111110,-41.34741666666667,0
+			-69.43722222222223,-41.97452777777778,0
+			-68.82902777777777,-42.29150000000000,0
+			-68.23011111111111,-42.59683333333333,0
+			-67.62719444444444,-42.89752777777777,0
+			-67.01655555555556,-43.19533333333333,0
+			-66.40255555555557,-43.48808333333333,0
+			-65.77861111111110,-43.77877777777777,0
+			-65.15202777777779,-44.06391666666666,0
+			-63.85869444444444,-44.63155555555556,0
+        </coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>
