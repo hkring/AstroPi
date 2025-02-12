@@ -166,9 +166,9 @@ for i in range(1, len(images), 1):
     
     distance = calculate_haversine(pointAlat, pointAlon, pointBlat, pointBlon)  
     images[i].update({"distance": distance})
-    timedifference = get_time_difference(images[i-1].get("imagepath"), images[i].get("imagepath"))
-    images[i].update({"timedifference": timedifference})
-    speed = distance / timedifference
+    dtime = get_time_difference(images[i-1].get("imagepath"), images[i].get("imagepath"))
+    images[i].update({"dtime": dtime})
+    speed = distance / dtime
     images[i].update({"speed": speed})
 
 # Holger comment: path decimal coordinates
@@ -188,3 +188,6 @@ k = 'speed' # key
 seg_speed = list(i[k] for i in images if k in i)
 avg_spee = sum(seg_speed) / len(seg_speed)
 logger.debug(f"The average speed is {avg_spee} in kmps") 
+
+period = 2*math.pi*R/(avg_spee)
+logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
