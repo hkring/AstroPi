@@ -3,14 +3,13 @@ from logzero import logger
 from astro_pi_orbit import ISS
 from picamzero import Camera
 from exif import Image
-import cv2
-import math
-import os
+import cv2, math, os, io
 
 iss = ISS()
 cam = Camera()
 duration = 30 # seconds
 starttime = datetime.now().timestamp()
+imagerelpath = "./photos" #./test
 
 R   = 6378.137 #Radius earth in km
 GSD = 12648    # ground sample distance in cm/pixel
@@ -165,7 +164,6 @@ def delete_files_in_directory(directory_path):
 #   + distance (floor)      - angular distance between two points   
 images = [{"imagepath":  "test/photo_0673.jpg"}] #example
 images.clear()
-imagerelpath = "./photos"
 
 try:
     os.mkdir(imagerelpath)
@@ -236,4 +234,11 @@ period = 0.0
 if(avg_speed > 0):
     period = 2*math.pi*R/(avg_speed)
 logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
+
+outputfilepath = "./result.txt"
+outputstring = "{:.4f}".format(avg_speed)
+with io.open(outputfilepath, 'w') as file:
+    file.write(outputstring)
+
+logger.debug(f"Result written to {outputfilepath}")
 
