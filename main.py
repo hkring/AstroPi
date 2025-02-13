@@ -5,11 +5,15 @@ from picamzero import Camera
 from exif import Image
 import cv2
 import math
+import os
 
 iss = ISS()
 cam = Camera()
 duration = 30 # seconds
 starttime = datetime.now().timestamp()
+
+R   = 6378.137 #Radius earth in km
+GSD = 12648    # ground sample distance in cm/pixel
 
 def get_gps_coordinates(iss):
     point = iss.coordinates()
@@ -27,6 +31,70 @@ def get_time_difference(image_1, image_2):
     time_2 = get_time(image_2)
     time_difference = time_2 - time_1
     return time_difference.seconds
+
+def get_sign(refchar: str) -> float:
+    '''
+    Convert a direction character degree minutes seconds (DMS) coordinates 
+
+    Args:
+        drection (str): N, E, S or W
+
+    Returns: 
+        signed (float): -1.0 for N or E, 1.0 for S or W       
+    '''
+    match refchar:
+        case "N" | "E":
+            return 1.0
+        case "S" | "W":
+            return -1.0
+        case _:
+            return 1.0 
+
+def convert_to_degree(dms: tuple[float]) -> float:
+    '''
+    Convert degree minutes seconds (DMS) to decimal coordinates
+
+    Args:
+        dms (tuple[float]): degree, minute, seconds
+
+    Returns:
+        decimal (float): coordinate not signed     
+    '''
+    return dms[0] + (dms[1] / 60) + (dms[2] / 3600)
+
+def get_signedLatCoordinate(image: str) -> float:
+    """
+    Read Image Meta data and returns signed decimal coordinates
+
+    Args:
+        image (string): file path to Exif Image
+
+    Returns:
+        decimal (floor): latitude
+    """
+    with open(image, 'rb') as image_file:
+        img = Image(image_file)
+        lat = img.get('gps_latitude')
+        latref = img.get('gps_latitude_ref')
+        signedlat = get_sign(latref) * convert_to_degree(lat)
+        return signedlat
+
+def get_signedLonCoordinate(image: str) -> float:
+    """
+    Read Image Meta data and returns signed decimal coordinates
+
+    Args:
+        image (string): file path to Exif Image
+
+    Returns:
+        decimal (floor): longitude 
+    """
+    with open(image, 'rb') as image_file:
+        img = Image(image_file)
+        lon = img.get('gps_longitude')
+        lonref = img.get('gps_longitude_ref')
+        signedlon = get_sign(lonref) * convert_to_degree(lon)
+        return signedlon
 
 def convert_to_cv(image_1, image_2):
     image_1_cv = cv2.imread(image_1, 0)
@@ -58,10 +126,11 @@ def find_matching_coordinates(keypoints_1, keypoints_2, matches):
         image_1_idx = match.queryIdx
         image_2_idx = match.trainIdx
         (x1, y1) = keypoints_1[image_1_idx].pt
-        (x2, y2) = keypoints_1[image_2_idx].pt
+        (x2, y2) = keypoints_2[image_2_idx].pt
         coordinates_1.append((x1,y1)) 
         coordinates_2.append((x2,y2))  
     return coordinates_1, coordinates_2
+
 
 def calculate_mean_distance(coordinates_1, coordinates_2):
     all_distance = 0
@@ -78,6 +147,36 @@ def calculate_speed_inkmps(feature_distance, GSD, time_difference):
     speed = distance / time_difference
     return speed
 
+def delete_files_in_directory(directory_path):
+   try:
+     files = os.listdir(directory_path)
+     for file in files:
+       file_path = os.path.join(directory_path, file)
+       if os.path.isfile(file_path):
+         os.remove(file_path)
+     print("All files deleted successfully.")
+   except OSError:
+     print("Error occurred while deleting files.")
+
+# Holger comment: Defining a data structure for each image instead of multiple loose variables
+# Images -> List (Dictonary)
+#   + imagepath (string)    - file path 
+#   + latlon (tuple[floor]) - decimal coordinate
+#   + distance (floor)      - angular distance between two points   
+images = [{"imagepath":  "test/photo_0673.jpg"}] #example
+images.clear()
+imagerelpath = "./photos"
+
+try:
+    os.mkdir(imagerelpath)
+except FileExistsError:
+    logger.warning(f"Directory '{imagerelpath}' already exists.")
+    if (imagerelpath != "./test") :
+        delete_files_in_directory(imagerelpath)
+except PermissionError:
+    logger.error(f"Permission denied: Unable to create '{imagerelpath}'.")
+    imagerelpath = ""  
+
 i = 1
 lastPictureTime = 0
 while datetime.now().timestamp() - starttime < duration:
@@ -88,15 +187,53 @@ while datetime.now().timestamp() - starttime < duration:
         cam.take_photo(f'gps_image{i:02d}.jpg', gps_coordinates=get_gps_coordinates(iss))
         i += 1
         lastPictureTime = datetime.now().timestamp()    
-       
-time_difference = get_time_difference('gps_image01.jpg','gps_image02.jpg')
-image_1_cv, image_2_cv = convert_to_cv('gps_image01.jpg','gps_image02.jpg')
-keypoints_1, keypoints_2, descriptors_1, descriptors_2 = calculate_features(image_1_cv, image_2_cv, 1000)
-matches = calculate_matches(descriptors_1, descriptors_2)
 
-display_matches(image_1_cv, keypoints_1, image_2_cv, keypoints_2, matches)
+files = [f for f in os.listdir(imagerelpath)] 
+for f in files:
+    if imagerelpath == "":
+        images.append({"imagepath": f})
+    else:
+        images.append({"imagepath": imagerelpath + '/' + f})
 
-coordinates_1, coordinates_2 = find_matching_coordinates(keypoints_1, keypoints_2, matches)
-average_feature_distance = calculate_mean_distance(coordinates_1, coordinates_2)
-speed = calculate_speed_inkmps(average_feature_distance, 12648, time_difference)
-print(speed)
+# Holger comment: Loop over all images and extract decimal coordinates
+for img in images:
+    img.update({"datetime_original":get_time(img.get("imagepath"))})
+    img.update({"latitude": get_signedLatCoordinate(img.get("imagepath"))})
+    img.update({"longitude": get_signedLonCoordinate(img.get("imagepath"))})
+
+# Holger comment: Caclulate angular distance. Start the loop with the second image but use the previous image[i-1] to extract the start point 
+for i in range(1, len(images), 1):
+    dtime = get_time_difference(images[i-1].get("imagepath"),images[i].get("imagepath"))    
+    images[i].update({"dtime": dtime})
+    image_1_cv, image_2_cv = convert_to_cv(images[i-1].get("imagepath"),images[i].get("imagepath"))
+    keypoints_1, keypoints_2, descriptors_1, descriptors_2 = calculate_features(image_1_cv, image_2_cv, 1000)
+    matches = calculate_matches(descriptors_1, descriptors_2)
+    coordinates_1, coordinates_2 = find_matching_coordinates(keypoints_1, keypoints_2, matches)
+    avg_distance = calculate_mean_distance(coordinates_1, coordinates_2)
+    images[i].update({"distance": avg_distance})
+    speed = calculate_speed_inkmps(avg_distance, 12648, dtime)
+    images[i].update({"speed": speed})
+
+# Holger comment: calculate total path length 
+k = 'distance' # key
+seg_distance = list(i[k] for i in images if k in i)
+
+# Holger comment: sum the distance of ALL segments
+total = sum(seg_distance)
+logger.debug(f"The total feature distance is {total} in pixel") 
+logger.debug(f"The total distance is {total*GSD/100000} in km") 
+
+# Holger comment: average ground speed
+k = 'speed' # key
+seg_speed = list(i[k] for i in images if k in i)
+
+avg_speed = 0.0
+if len(seg_speed) > 0:
+    avg_speed = sum(seg_speed) / len(seg_speed)
+logger.debug(f"The average speed is {avg_speed} in kmps") 
+
+period = 0.0
+if(avg_speed > 0):
+    period = 2*math.pi*R/(avg_speed)
+logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
+
