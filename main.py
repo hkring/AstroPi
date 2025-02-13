@@ -2,8 +2,11 @@ from exif import Image
 from datetime import datetime
 from logzero import logger
 import math
+import os
 
 R = 6378.137 #Radius earth in km
+duration = 30 # seconds
+starttime = datetime.now().timestamp()
 
 def get_time(image):
     with open(image, 'rb') as image_file:
@@ -128,7 +131,6 @@ def calculate_haversine(pointAlat: float, pointAlon: float, pointBlat: float, pi
     a = 0.5 - math.cos(dlat)/2 + math.cos(convert_degreeToRadian(pointAlat)) * math.cos(convert_degreeToRadian(pointBlat)) * (1-math.cos(dlon))/2
     c = 2* math.asin(math.sqrt(a))
     return R*c 
-#----------------------------------------------------- Main Logic -------------------------------------------------------
 
 # Holger comment: Defining a data structure for each image instead of multiple loose variables
 # Images -> List (Dictonary)
@@ -150,6 +152,15 @@ images = [
     {"imagepath":  "test/photo_0685.jpg"},
     {"imagepath":  "test/photo_0687.jpg"}
     ]
+
+#----------------------------------------------------- Main Logic -------------------------------------------------------
+
+# Holger comment: read filepath from folders
+images.clear()
+imagerelpath = "./test"
+files = [f for f in os.listdir(imagerelpath)] 
+for f in files:
+    images.append({"imagepath": imagerelpath +'/' + f})
 
 # Holger comment: Loop over all images and extract decimal coordinates
 for img in images:
