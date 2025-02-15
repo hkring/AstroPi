@@ -1,20 +1,20 @@
 from datetime import datetime
 from logzero import logger
-#from astro_pi_orbit import ISS
-#from picamzero import Camera
+from astro_pi_orbit import ISS
+from picamzero import Camera
 from exif import Image
 import cv2, math, os, io
 import pandas as pd
 
-#iss = ISS()
-#cam = Camera()
+iss = ISS()
+cam = Camera()
 duration = 30 # seconds
 starttime = datetime.now().timestamp()
-imagerelpath = "./test"#"./photos" #./test
+imagerelpath = "./photos"#"./photos" #./test
 
 R   = 6378.137 #Radius earth in km
-
-GSD = 12648    # ground sample distance in cm/pixel
+#GSD = 12648    # (4056, 3040) ground sample distance in cm/pixel
+GSD = 25297    # (2028, 1520) ground sample distance in cm/pixel
 
 def get_gps_coordinates(iss):
     point = iss.coordinates()
@@ -207,16 +207,17 @@ except PermissionError:
     logger.error(f"Permission denied: Unable to create '{imagerelpath}'.")
     imagerelpath = ""  
 
-#i = 1
-#lastPictureTime = 0
-#while datetime.now().timestamp() - starttime < duration:
-#    
-#    # get new picture every 15 seconds
-#    if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 15:
-#        logger.debug("Take a new shot " + f'gps_image{i:02d}.jpg')
-#        cam.take_photo(f'gps_image{i:02d}.jpg', gps_coordinates=get_gps_coordinates(iss))
-#        i += 1
-#        lastPictureTime = datetime.now().timestamp()    
+i = 1
+lastPictureTime = 0
+while datetime.now().timestamp() - starttime < duration:
+    
+    # get new picture every 15 seconds
+    if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 15:
+        imagename = imagerelpath + f'/gps_image{i:02d}.jpg'
+        logger.debug("Take a new shot " + imagename)
+        cam.take_photo(imagename, gps_coordinates=get_gps_coordinates(iss))
+        i += 1
+        lastPictureTime = datetime.now().timestamp()    
 
 files = [f for f in os.listdir(imagerelpath)] 
 for f in files:
@@ -247,7 +248,7 @@ for i in range(1, len(images), 1):
     coordinates_1, coordinates_2 = find_matching_coordinates(keypoints_1, keypoints_2, matches)
     pixeldistance = calculate_mean_distance(coordinates_1, coordinates_2)
     images[i].update({"pixeldistance": pixeldistance})
-    speed = calculate_speed_inkmps(pixeldistance, 12648, dtime)
+    speed = calculate_speed_inkmps(pixeldistance, GSD, dtime)
     images[i].update({"speed": speed})
 
 # Holger comment: calculate total path length 
@@ -293,3 +294,4 @@ for img in images:
 geolocfilepath = "./geoloc.txt"
 with io.open(geolocfilepath, 'w') as file:
     file.writelines(geolocation)
+ 
