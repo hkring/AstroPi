@@ -1,10 +1,9 @@
 from exif import Image
 from datetime import datetime
 from logzero import logger
-import math
-import os
+import math, os
 
-R = 6378.137 #Radius earth in km
+R = 6378137   # Radius earth in [m] 
 duration = 30 # seconds
 starttime = datetime.now().timestamp()
 
@@ -116,19 +115,21 @@ def convert_degreeToRadian(degree: float) -> float:
     '''
     return degree * math.pi / 180
 
-def calculate_haversine(pointAlat: float, pointAlon: float, pointBlat: float, pintBlon: float) -> float:
+def calculate_haversine(originAlat: float, originAlon: float, pointBlat: float, pointBlon: float) -> float:
     """
-    Calculate the angular distance between two points on a surface of a sphere
+    Calculate the arc length between two points on a surface of a sphere
 
     Args:
-        pointA (tuble(float)): start point
-        pointB (tuble(float)): end point
+        originAlat (float): origin latitide in [decimal degree]
+        originAlon (float): origin longitude in [decimal degree]
+        pointBlat (float): point latitide in [decimal degree]
+        pointBlon (float): point longitude in [decimal degree]
 
-    return distance (float)     
+    return arc length (float)     
     """ 
-    dlat = convert_degreeToRadian(pointBlat) - convert_degreeToRadian(pointAlat)
-    dlon = convert_degreeToRadian(pintBlon) - convert_degreeToRadian(pointAlon)
-    a = 0.5 - math.cos(dlat)/2 + math.cos(convert_degreeToRadian(pointAlat)) * math.cos(convert_degreeToRadian(pointBlat)) * (1-math.cos(dlon))/2
+    dlat = convert_degreeToRadian(pointBlat) - convert_degreeToRadian(originAlat)
+    dlon = convert_degreeToRadian(pointBlon) - convert_degreeToRadian(originAlon)
+    a = 0.5 - math.cos(dlat)/2 + math.cos(convert_degreeToRadian(originAlat)) * math.cos(convert_degreeToRadian(pointBlat)) * (1-math.cos(dlon))/2
     c = 2* math.asin(math.sqrt(a))
     return R*c 
 
@@ -139,18 +140,18 @@ def calculate_haversine(pointAlat: float, pointAlon: float, pointBlat: float, pi
 #   + distance (floor)      - angular distance between two points   
 images = [
     {"imagepath":  "test/photo_0673.jpg"},
-    {"imagepath":  "test/photo_0674.jpg"},
-    {"imagepath":  "test/photo_0675.jpg"},
-    {"imagepath":  "test/photo_0676.jpg"},
-    {"imagepath":  "test/photo_0678.jpg"},
-    {"imagepath":  "test/photo_0679.jpg"},
-    {"imagepath":  "test/photo_0680.jpg"},
-    {"imagepath":  "test/photo_0681.jpg"},
-    {"imagepath":  "test/photo_0682.jpg"},
-    {"imagepath":  "test/photo_0683.jpg"},
-    {"imagepath":  "test/photo_0684.jpg"},
-    {"imagepath":  "test/photo_0685.jpg"},
-    {"imagepath":  "test/photo_0687.jpg"}
+    {"imagepath":  "test/photo_0674.jpg"}#,
+    #{"imagepath":  "test/photo_0675.jpg"},
+    #{"imagepath":  "test/photo_0676.jpg"},
+    #{"imagepath":  "test/photo_0678.jpg"},
+    #{"imagepath":  "test/photo_0679.jpg"},
+    #{"imagepath":  "test/photo_0680.jpg"},
+    #{"imagepath":  "test/photo_0681.jpg"},
+    #{"imagepath":  "test/photo_0682.jpg"},
+    #{"imagepath":  "test/photo_0683.jpg"},
+    #{"imagepath":  "test/photo_0684.jpg"},
+    #{"imagepath":  "test/photo_0685.jpg"},
+    #{"imagepath":  "test/photo_0687.jpg"}
     ]
 
 #----------------------------------------------------- Main Logic -------------------------------------------------------
@@ -160,7 +161,10 @@ images.clear()
 imagerelpath = "./test"
 files = [f for f in os.listdir(imagerelpath)] 
 for f in files:
-    images.append({"imagepath": imagerelpath +'/' + f})
+    if imagerelpath == "":
+        images.append({"imagepath": f})
+    else:
+        images.append({"imagepath": imagerelpath + '/' + f})
 
 # Holger comment: Loop over all images and extract decimal coordinates
 for img in images:
@@ -174,30 +178,33 @@ for i in range(1, len(images), 1):
     pointAlon = images[i-1].get("longitude")
     pointBlat = images[i].get("latitude")
     pointBlon = images[i].get("longitude")
-    
-    distance = calculate_haversine(pointAlat, pointAlon, pointBlat, pointBlon)  
-    images[i].update({"distance": distance})
+
+    arclength = calculate_haversine(pointAlat, pointAlon, pointBlat, pointBlon)  
+    images[i].update({"arclength": arclength})
     dtime = get_time_difference(images[i-1].get("imagepath"), images[i].get("imagepath"))
     images[i].update({"dtime": dtime})
-    speed = distance / dtime
+    speed = arclength / dtime
     images[i].update({"speed": speed})
 
 # Holger comment: path decimal coordinates
 for img in images:
     print('{:.14f}'.format(img.get("latitude")), '{:.14f}'.format(img.get("longitude"))) 
 
+for img in images:
+    print(img) 
+
 # Holger comment: calculate total path length 
-k = 'distance' # key
-seg_distance = list(i[k] for i in images if k in i)
+k = 'arclength' # key
+seg_d = list(i[k] for i in images if k in i)
 
 # Holger comment: sum the distance of ALL segments
-total = sum(seg_distance)
-logger.debug(f"The path distance is {total} in km") 
+total = sum(seg_d)
+logger.debug(f"The path distance is {total} in [m]") 
 
 # Holger comment: average ground speed
 k = 'speed' # key
 seg_speed = list(i[k] for i in images if k in i)
-avg_spee = sum(seg_speed) / len(seg_speed)
+avg_spee = sum(seg_speed) / (1000 * len(seg_speed))
 logger.debug(f"The average speed is {avg_spee} in kmps") 
 
 period = 2*math.pi*R/(avg_spee)

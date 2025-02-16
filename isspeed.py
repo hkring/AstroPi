@@ -1,11 +1,12 @@
 from datetime import datetime
 from logzero import logger
 from exif import Image
-import cv2
-import math
+import cv2, math
+import pandas as pd
 
-R   = 6378.137 #Radius earth in km
-GSD = 12648    # ground sample distance in cm/pixel
+R = 6378137   # Radius earth in [m] 
+#GSD = 12648    # ground sample distance in cm/pixel
+GSD = 11625
 
 def get_gps_coordinates(iss):
     point = iss.coordinates()
@@ -60,14 +61,16 @@ def find_matching_coordinates(keypoints_1, keypoints_2, matches):
     return coordinates_1, coordinates_2
 
 def calculate_mean_distance(coordinates_1, coordinates_2):
-    all_distance = 0
     merged_coordinates = list(zip(coordinates_1, coordinates_2))
+    distances = []
     for coordinates in merged_coordinates:
         x_difference = coordinates[0][0] - coordinates[1][0]
         y_difference = coordinates[0][1] - coordinates[1][1]
-        distance = math.hypot(x_difference, y_difference)
-        all_distance = all_distance + distance
-    return all_distance / len(merged_coordinates)
+        distances.append(math.hypot(x_difference, y_difference))
+    d = pd.Series(distances)
+    outliers = d.between(d.quantile(.05), d.quantile(.95))
+    #print(str(d[outliers].size) + "/" + str(d.size) + " data points remain.")
+    return d[outliers].mean() 
 
 def calculate_speed_inkmps(feature_distance: float, gsd: float, time_difference: float):
     '''
@@ -120,6 +123,9 @@ for i in range(1, len(images), 1):
     speed = calculate_speed_inkmps(avg_distance, 12648, dtime)
     images[i].update({"speed": speed})
 
+for img in images:
+    print(img) 
+
 # Holger comment: calculate total path length 
 k = 'distance' # key
 seg_distance = list(i[k] for i in images if k in i)
@@ -135,5 +141,5 @@ seg_speed = list(i[k] for i in images if k in i)
 avg_spee = sum(seg_speed) / len(seg_speed)
 logger.debug(f"The average speed is {avg_spee} in kmps") 
 
-period = 2*math.pi*R/(avg_spee)
+period = 2*math.pi*R/(1000 * avg_spee)
 logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
