@@ -45,6 +45,11 @@ def get_ISS_coordinates():
     point = iss.coordinates()
     return (point.latitude.signed_dms(), point.longitude.signed_dms())
 
+def get_image_width(image):
+     with open(image, 'rb') as image_file:
+        img = Image(image_file)
+        return img.get("image_width")
+
 def get_time(image):
     with open(image, 'rb') as image_file:
         img = Image(image_file)
@@ -236,7 +241,7 @@ def image_update(previousimage, thisimage) -> None:
     originAlon = previousimage.get("longitude")
     pointBlat = thisimage.get("latitude")
     pointBlon = thisimage.get("longitude")
-    angulardistance_m = calculate_haversine((R+H), originAlat, originAlon, pointBlat, pointBlon)  
+    angulardistance_m = calculate_haversine((R), originAlat, originAlon, pointBlat, pointBlon)  
     thisimage.update({"angulardistance_m": angulardistance_m})
     deltatime_sec = get_time_difference(previousimage.get("imagepath"),thisimage.get("imagepath"))    
     thisimage.update({"deltatime_sec": deltatime_sec})
@@ -246,7 +251,8 @@ def image_update(previousimage, thisimage) -> None:
     coordinates_1, coordinates_2 = find_matching_coordinates(keypoints_1, keypoints_2, matches)
     featuredistance_pixel = calculate_mean_distance(coordinates_1, coordinates_2)
     thisimage.update({"featuredistance_pixel": featuredistance_pixel})
-    speed_kmps = calculate_speed_inkmps(featuredistance_pixel, GSD, deltatime_sec)
+
+    speed_kmps = calculate_speed_inkmps(featuredistance_pixel, thisimage.get("gsd"), deltatime_sec)
     thisimage.update({"speed_kmps": speed_kmps})
     logger.debug(f'Extract&Calculate path section finished!')
 
@@ -266,9 +272,11 @@ while datetime.now().timestamp() - starttime < duration:
     if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 15:
         next_image(len(images))
         thisimage = images[len(images)-1]
+        print(get_image_width(thisimage.get("imagepath")))
         thisimage.update({"datetime_original":get_time(thisimage.get("imagepath"))})
         thisimage.update({"latitude": get_signedLatCoordinate(thisimage.get("imagepath"))})
         thisimage.update({"longitude": get_signedLonCoordinate(thisimage.get("imagepath"))})
+        thisimage.update({"gsd": calculate_ground_sampling_distance(get_image_width(thisimage.get("imagepath")),H)})
         if (len(images) > 1):
             previousimage = images[len(images)-2]
             image_update(previousimage, thisimage)
@@ -280,9 +288,11 @@ k = 'featuredistance_pixel' # key
 featuredistance_pixel = list(i[k] for i in images if k in i)
 
 # Sum the distance of ALL segments
+
 totaldistance_pixels = sum(featuredistance_pixel)
 logger.debug(f"The total feature distance is {totaldistance_pixels} in pixel") 
-logger.debug(f"The calculated distance is {totaldistance_pixels*GSD/100000} in km") 
+gsd = images[0].get("gsd")
+logger.debug(f"The calculated distance is {totaldistance_pixels*gsd/100000} in km") 
 
 k = 'angulardistance_m' # key
 angulardistance_m = list(i[k] for i in images if k in i)
