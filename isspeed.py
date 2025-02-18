@@ -3,11 +3,7 @@ from logzero import logger
 from exif import Image
 import cv2, math
 import pandas as pd
-
-R = 6378137   # Radius earth in [m] 
-#GSD = 12648    # ground sample distance in cm/pixel
-GSD = 11625
-
+ 
 def get_gps_coordinates(iss):
     point = iss.coordinates()
     return (point.latitude.signed_dms(), point.longitude.signed_dms())
@@ -84,62 +80,73 @@ def calculate_speed_inkmps(feature_distance: float, gsd: float, time_difference:
     distance = feature_distance * gsd / 100000
     speed = distance / time_difference
     return speed
+    
+#----------------------------------------------------- Main Logic -------------------------------------------------------
+def main() -> None:
 
+    R = 6378137   # Radius earth in [m] 
+    #GSD = 12648    # ground sample distance in cm/pixel
+    GSD = 11625
 
-# Holger comment: Defining a data structure for each image instead of multiple loose variables
-# Images -> List (Dictonary)
-#   + imagepath (string)    - file path 
-#   + latlon (tuple[floor]) - decimal coordinate
-#   + distance (floor)      - angular distance between two points   
-images = [
-    {"imagepath":  "test/photo_0673.jpg"},
-    {"imagepath":  "test/photo_0674.jpg"},
-    {"imagepath":  "test/photo_0675.jpg"},
-    {"imagepath":  "test/photo_0676.jpg"},
-    {"imagepath":  "test/photo_0678.jpg"},
-    {"imagepath":  "test/photo_0679.jpg"},
-    {"imagepath":  "test/photo_0680.jpg"},
-    {"imagepath":  "test/photo_0681.jpg"},
-    {"imagepath":  "test/photo_0682.jpg"},
-    {"imagepath":  "test/photo_0683.jpg"},
-    {"imagepath":  "test/photo_0684.jpg"},
-    {"imagepath":  "test/photo_0685.jpg"},
-    {"imagepath":  "test/photo_0687.jpg"}
-    ]
+    # Holger comment: Defining a data structure for each image instead of multiple loose variables
+    # Images -> List (Dictonary)
+    #   + imagepath (string)    - file path 
+    #   + latlon (tuple[floor]) - decimal coordinate
+    #   + distance (floor)      - angular distance between two points   
+    images = [
+        {"imagepath":  "test/photo_0673.jpg"},
+        {"imagepath":  "test/photo_0674.jpg"},
+        {"imagepath":  "test/photo_0675.jpg"},
+        {"imagepath":  "test/photo_0676.jpg"},
+        {"imagepath":  "test/photo_0678.jpg"},
+        {"imagepath":  "test/photo_0679.jpg"},
+        {"imagepath":  "test/photo_0680.jpg"},
+        {"imagepath":  "test/photo_0681.jpg"},
+        {"imagepath":  "test/photo_0682.jpg"},
+        {"imagepath":  "test/photo_0683.jpg"},
+        {"imagepath":  "test/photo_0684.jpg"},
+        {"imagepath":  "test/photo_0685.jpg"},
+        {"imagepath":  "test/photo_0687.jpg"}
+        ]
+    
+    for img in images:
+        img.update({"datetime_original":get_time(img.get("imagepath"))})
+    
+    # Holger comment: Caclulate angular distance. Start the loop with the second image but use the previous image[i-1] to extract the start point 
+    for i in range(1, len(images), 1):
+        dtime = get_time_difference(images[i-1].get("imagepath"),images[i].get("imagepath"))    
+        images[i].update({"dtime": dtime})
+        image_1_cv, image_2_cv = convert_to_cv(images[i-1].get("imagepath"),images[i].get("imagepath"))
+        keypoints_1, keypoints_2, descriptors_1, descriptors_2 = calculate_features(image_1_cv, image_2_cv, 1000)
+        matches = calculate_matches(descriptors_1, descriptors_2)
+        coordinates_1, coordinates_2 = find_matching_coordinates(keypoints_1, keypoints_2, matches)
+        avg_distance = calculate_mean_distance(coordinates_1, coordinates_2)
+        images[i].update({"distance": avg_distance})
+        speed = calculate_speed_inkmps(avg_distance, 12648, dtime)
+        images[i].update({"speed": speed})
+    
+    for img in images:
+        print(img) 
+    
+    # Holger comment: calculate total path length 
+    k = 'distance' # key
+    seg_distance = list(i[k] for i in images if k in i)
+    
+    # Holger comment: sum the distance of ALL segments
+    total = sum(seg_distance)
+    logger.debug(f"The total feature distance is {total} in pixel") 
+    logger.debug(f"The total distance is {total*GSD/100000} in km") 
+    
+    # Holger comment: average ground speed
+    k = 'speed' # key
+    seg_speed = list(i[k] for i in images if k in i)
+    avg_spee = sum(seg_speed) / len(seg_speed)
+    logger.debug(f"The average speed is {avg_spee} in kmps") 
+    
+    period = 2*math.pi*R/(1000 * avg_spee)
+    logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
 
-for img in images:
-    img.update({"datetime_original":get_time(img.get("imagepath"))})
+if __name__ == "__main__":
+    main()
 
-# Holger comment: Caclulate angular distance. Start the loop with the second image but use the previous image[i-1] to extract the start point 
-for i in range(1, len(images), 1):
-    dtime = get_time_difference(images[i-1].get("imagepath"),images[i].get("imagepath"))    
-    images[i].update({"dtime": dtime})
-    image_1_cv, image_2_cv = convert_to_cv(images[i-1].get("imagepath"),images[i].get("imagepath"))
-    keypoints_1, keypoints_2, descriptors_1, descriptors_2 = calculate_features(image_1_cv, image_2_cv, 1000)
-    matches = calculate_matches(descriptors_1, descriptors_2)
-    coordinates_1, coordinates_2 = find_matching_coordinates(keypoints_1, keypoints_2, matches)
-    avg_distance = calculate_mean_distance(coordinates_1, coordinates_2)
-    images[i].update({"distance": avg_distance})
-    speed = calculate_speed_inkmps(avg_distance, 12648, dtime)
-    images[i].update({"speed": speed})
-
-for img in images:
-    print(img) 
-
-# Holger comment: calculate total path length 
-k = 'distance' # key
-seg_distance = list(i[k] for i in images if k in i)
-
-# Holger comment: sum the distance of ALL segments
-total = sum(seg_distance)
-logger.debug(f"The total feature distance is {total} in pixel") 
-logger.debug(f"The total distance is {total*GSD/100000} in km") 
-
-# Holger comment: average ground speed
-k = 'speed' # key
-seg_speed = list(i[k] for i in images if k in i)
-avg_spee = sum(seg_speed) / len(seg_speed)
-logger.debug(f"The average speed is {avg_spee} in kmps") 
-
-period = 2*math.pi*R/(1000 * avg_spee)
-logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
+#----------------------------------------------------- Main Logic-------------------------------------------------------   

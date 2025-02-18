@@ -2,11 +2,7 @@ from exif import Image
 from datetime import datetime
 from logzero import logger
 import math, os
-
-R = 6378137   # Radius earth in [m] 
-duration = 30 # seconds
-starttime = datetime.now().timestamp()
-
+  
 def get_time(image):
     with open(image, 'rb') as image_file:
         img = Image(image_file)
@@ -115,11 +111,12 @@ def convert_degreeToRadian(degree: float) -> float:
     '''
     return degree * math.pi / 180
 
-def calculate_haversine(originAlat: float, originAlon: float, pointBlat: float, pointBlon: float) -> float:
+def calculate_haversine(r: float, originAlat: float, originAlon: float, pointBlat: float, pointBlon: float) -> float:
     """
     Calculate the arc length between two points on a surface of a sphere
 
     Args:
+        r (float): radius of the sphere 
         originAlat (float): origin latitide in [decimal degree]
         originAlon (float): origin longitude in [decimal degree]
         pointBlat (float): point latitide in [decimal degree]
@@ -131,81 +128,98 @@ def calculate_haversine(originAlat: float, originAlon: float, pointBlat: float, 
     dlon = convert_degreeToRadian(pointBlon) - convert_degreeToRadian(originAlon)
     a = 0.5 - math.cos(dlat)/2 + math.cos(convert_degreeToRadian(originAlat)) * math.cos(convert_degreeToRadian(pointBlat)) * (1-math.cos(dlon))/2
     c = 2* math.asin(math.sqrt(a))
-    return R*c 
+    return r*c 
 
-# Holger comment: Defining a data structure for each image instead of multiple loose variables
-# Images -> List (Dictonary)
-#   + imagepath (string)    - file path 
-#   + latlon (tuple[floor]) - decimal coordinate
-#   + distance (floor)      - angular distance between two points   
-images = [
-    {"imagepath":  "test/photo_0673.jpg"},
-    {"imagepath":  "test/photo_0674.jpg"}#,
-    #{"imagepath":  "test/photo_0675.jpg"},
-    #{"imagepath":  "test/photo_0676.jpg"},
-    #{"imagepath":  "test/photo_0678.jpg"},
-    #{"imagepath":  "test/photo_0679.jpg"},
-    #{"imagepath":  "test/photo_0680.jpg"},
-    #{"imagepath":  "test/photo_0681.jpg"},
-    #{"imagepath":  "test/photo_0682.jpg"},
-    #{"imagepath":  "test/photo_0683.jpg"},
-    #{"imagepath":  "test/photo_0684.jpg"},
-    #{"imagepath":  "test/photo_0685.jpg"},
-    #{"imagepath":  "test/photo_0687.jpg"}
-    ]
+def delete_files_in_directory(directory_path):
+   try:
+     files = os.listdir(directory_path)
+     for file in files:
+       file_path = os.path.join(directory_path, file)
+       if os.path.isfile(file_path):
+         os.remove(file_path)
+     print("All files deleted successfully.")
+   except OSError:
+     print("Error occurred while deleting files.")
 
 #----------------------------------------------------- Main Logic -------------------------------------------------------
+def main() -> None:
 
-# Holger comment: read filepath from folders
-images.clear()
-imagerelpath = "./test"
-files = [f for f in os.listdir(imagerelpath)] 
-for f in files:
-    if imagerelpath == "":
-        images.append({"imagepath": f})
-    else:
-        images.append({"imagepath": imagerelpath + '/' + f})
+    R = 6378137   # Radius earth in [m] 
+    h = 420000    # ISS orbit height in [m]
 
-# Holger comment: Loop over all images and extract decimal coordinates
-for img in images:
-    img.update({"datetime_original":get_time(img.get("imagepath"))})
-    img.update({"latitude": get_signedLatCoordinate(img.get("imagepath"))})
-    img.update({"longitude": get_signedLonCoordinate(img.get("imagepath"))})
+    imagerelpath = "./test"
 
-# Holger comment: Caclulate angular distance. Start the loop with the second image but use the previous image[i-1] to extract the start point 
-for i in range(1, len(images), 1):
-    pointAlat = images[i-1].get("latitude")
-    pointAlon = images[i-1].get("longitude")
-    pointBlat = images[i].get("latitude")
-    pointBlon = images[i].get("longitude")
+    # Data structure for each image instead of multiple loose variables
+    # Images -> List (Dictonary)
+    #   + imagepath (string)           - file path 
+    #   + datetime_original (datetime) - image capture time
+    #   + latitude (floor)             - coordinate in [decimal degree] 
+    #   + lontitude (floor)            - coordinate in [decimal degree}
+    #   + arclength_m (floor)          - arc length between two points in [meter]
+    #   + deltatime_sec (floor)        - time difference in [seconds]
+    #   + ground_speed_mpsec (floor)   - ground speed in [meter per seconds]   
+    images = []
+    # read filepath from folders
+    images.clear()
+    # only for testing 
+    try:
+        os.mkdir(imagerelpath)
+    except FileExistsError:
+        logger.warning(f"Directory '{imagerelpath}' already exists.")
+        if (imagerelpath != "./test") :
+            delete_files_in_directory(imagerelpath)
+    except PermissionError:
+        logger.error(f"Permission denied: Unable to create '{imagerelpath}'.")
+        imagerelpath = ""  
 
-    arclength = calculate_haversine(pointAlat, pointAlon, pointBlat, pointBlon)  
-    images[i].update({"arclength": arclength})
-    dtime = get_time_difference(images[i-1].get("imagepath"), images[i].get("imagepath"))
-    images[i].update({"dtime": dtime})
-    speed = arclength / dtime
-    images[i].update({"speed": speed})
+    files = [f for f in os.listdir(imagerelpath)] 
+    for f in files:
+        if imagerelpath == "":
+            images.append({"imagepath": f})
+        else:
+            images.append({"imagepath": imagerelpath + '/' + f})
 
-# Holger comment: path decimal coordinates
-for img in images:
-    print('{:.14f}'.format(img.get("latitude")), '{:.14f}'.format(img.get("longitude"))) 
+    # Loop over all images and extract decimal coordinates
+    for img in images:
+        img.update({"datetime_original":get_time(img.get("imagepath"))})
+        img.update({"latitude": get_signedLatCoordinate(img.get("imagepath"))})
+        img.update({"longitude": get_signedLonCoordinate(img.get("imagepath"))})
 
-for img in images:
-    print(img) 
+    # Caclulate angular distance. Start the loop with the second image but use the previous image[i-1] to extract the origin
+    for i in range(1, len(images), 1):
+        pointAlat = images[i-1].get("latitude")
+        pointAlon = images[i-1].get("longitude")
+        pointBlat = images[i].get("latitude")
+        pointBlon = images[i].get("longitude")
 
-# Holger comment: calculate total path length 
-k = 'arclength' # key
-seg_d = list(i[k] for i in images if k in i)
+        arclength_m = calculate_haversine((R+h),pointAlat, pointAlon, pointBlat, pointBlon)  
+        images[i].update({"arclength_m": arclength_m})
+        deltatime_sec = get_time_difference(images[i-1].get("imagepath"), images[i].get("imagepath"))
+        images[i].update({"deltatime_sec": deltatime_sec})
+        speed_mpsec = arclength_m / deltatime_sec
+        images[i].update({"speed_mpsec": speed_mpsec})
 
-# Holger comment: sum the distance of ALL segments
-total = sum(seg_d)
-logger.debug(f"The path distance is {total} in [m]") 
+    # Path decimal coordinates
+    for img in images:
+        print('{:.14f}'.format(img.get("longitude")) + ',' + '{:.14f}'.format(img.get("latitude")) +',0') 
 
-# Holger comment: average ground speed
-k = 'speed' # key
-seg_speed = list(i[k] for i in images if k in i)
-avg_spee = sum(seg_speed) / (1000 * len(seg_speed))
-logger.debug(f"The average speed is {avg_spee} in kmps") 
+    # Calculate total path length 
+    k = 'arclength_m' # key
+    segment_m = list(i[k] for i in images if k in i)
+    totaldistance_m = sum(segment_m)
+    logger.debug(f"The path distance is {totaldistance_m} in [m]") 
 
-period = 2*math.pi*R/(avg_spee)
-logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
+    # Calculate average ground speed
+    k = 'speed_mpsec' # key
+    seg_speed_mpsec = list(i[k] for i in images if k in i)
+    avg_speed_mpsec = sum(seg_speed_mpsec) / len(seg_speed_mpsec)
+    logger.debug(f"The average speed is {avg_speed_mpsec/1000} in kmps") 
+
+    # Calculate the period the ISS orbits
+    period = 2*math.pi*(R+h)/(avg_speed_mpsec)
+    logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
+
+if __name__ == "__main__":
+    main()
+
+#----------------------------------------------------- Main Logic-------------------------------------------------------    
