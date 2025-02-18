@@ -257,75 +257,81 @@ def image_update(previousimage, thisimage) -> None:
     logger.debug(f'Extract&Calculate path section finished!')
 
 #----------------------------------------------------- Main Logic -------------------------------------------------------
+def main() -> None:
 
-logger.debug('Begin Main Logic ....')
-# read filepath from folders
-images.clear()
+    logger.debug('Begin Main Logic ....')
+    # read filepath from folders
+    images.clear()
 
-lastPictureTime = 0
-while datetime.now().timestamp() - starttime < duration:
-    # no more imgages allowed
-    if(len(images) >= MAX_images):
-        break
-      
-    # get new picture every 15 seconds
-    if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 15:
-        next_image(len(images))
-        thisimage = images[len(images)-1]
-        print(get_image_width(thisimage.get("imagepath")))
-        thisimage.update({"datetime_original":get_time(thisimage.get("imagepath"))})
-        thisimage.update({"latitude": get_signedLatCoordinate(thisimage.get("imagepath"))})
-        thisimage.update({"longitude": get_signedLonCoordinate(thisimage.get("imagepath"))})
-        thisimage.update({"gsd": calculate_ground_sampling_distance(get_image_width(thisimage.get("imagepath")),H)})
-        if (len(images) > 1):
-            previousimage = images[len(images)-2]
-            image_update(previousimage, thisimage)
-           
-        lastPictureTime = datetime.now().timestamp() 
+    lastPictureTime = 0
+    while datetime.now().timestamp() - starttime < duration:
+        # no more imgages allowed
+        if(len(images) >= MAX_images):
+            break
+        
+        # get new picture every 15 seconds
+        if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 15:
+            next_image(len(images))
+            thisimage = images[len(images)-1]
+            print(get_image_width(thisimage.get("imagepath")))
+            thisimage.update({"datetime_original":get_time(thisimage.get("imagepath"))})
+            thisimage.update({"latitude": get_signedLatCoordinate(thisimage.get("imagepath"))})
+            thisimage.update({"longitude": get_signedLonCoordinate(thisimage.get("imagepath"))})
+            thisimage.update({"gsd": calculate_ground_sampling_distance(get_image_width(thisimage.get("imagepath")),H)})
+            if (len(images) > 1):
+                previousimage = images[len(images)-2]
+                image_update(previousimage, thisimage)
+
+            lastPictureTime = datetime.now().timestamp() 
           
-# Calculate total feature distance
-k = 'featuredistance_pixel' # key
-featuredistance_pixel = list(i[k] for i in images if k in i)
+    # Calculate total feature distance
+    k = 'featuredistance_pixel' # key
+    featuredistance_pixel = list(i[k] for i in images if k in i)
 
-# Sum the distance of ALL segments
+    # Sum the distance of ALL segments
 
-totaldistance_pixels = sum(featuredistance_pixel)
-logger.debug(f"The total feature distance is {totaldistance_pixels} in pixel") 
-gsd = images[0].get("gsd")
-logger.debug(f"The calculated distance is {totaldistance_pixels*gsd/100000} in km") 
+    totaldistance_pixels = sum(featuredistance_pixel)
+    logger.debug(f"The total feature distance is {totaldistance_pixels} in pixel") 
+    gsd = images[0].get("gsd")
+    logger.debug(f"The calculated distance is {totaldistance_pixels*gsd/100000} in km") 
 
-k = 'angulardistance_m' # key
-angulardistance_m = list(i[k] for i in images if k in i)
-totalpathdistance_m = sum(angulardistance_m)
-logger.debug(f"The geo path distance is {totalpathdistance_m/1000} in km") 
+    k = 'angulardistance_m' # key
+    angulardistance_m = list(i[k] for i in images if k in i)
+    totalpathdistance_m = sum(angulardistance_m)
+    logger.debug(f"The geo path distance is {totalpathdistance_m/1000} in km") 
 
-# Average ground speed
-k = 'speed_kmps' # key
-seg_speed_kmps = list(i[k] for i in images if k in i)
+    # Average ground speed
+    k = 'speed_kmps' # key
+    seg_speed_kmps = list(i[k] for i in images if k in i)
 
-avg_speed_kmps = 0.0
-if len(seg_speed_kmps) > 0:
-    avg_speed_kmps = sum(seg_speed_kmps) / len(seg_speed_kmps)
-logger.debug(f"The average speed is {avg_speed_kmps} in kmps") 
+    avg_speed_kmps = 0.0
+    if len(seg_speed_kmps) > 0:
+        avg_speed_kmps = sum(seg_speed_kmps) / len(seg_speed_kmps)
+    logger.debug(f"The average speed is {avg_speed_kmps} in kmps") 
 
-period = 0.0
-if(avg_speed_kmps > 0):
-    period = 2*math.pi*(R +H)/(1000 * avg_speed_kmps)
-logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
+    period = 0.0
+    if(avg_speed_kmps > 0):
+        period = 2*math.pi*(R +H)/(1000 * avg_speed_kmps)
+    logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
 
-resultfilepath = "./result.txt"
-resultspeed_kmps = "{:.5f}".format(avg_speed_kmps)
-with io.open(resultfilepath, 'w') as file:
-    file.write(resultspeed_kmps)
+    resultfilepath = "./result.txt"
+    resultspeed_kmps = "{:.5f}".format(avg_speed_kmps)
+    with io.open(resultfilepath, 'w') as file:
+        file.write(resultspeed_kmps)
 
-logger.debug(f"Result speed {resultspeed_kmps} written to {resultfilepath}")
+    logger.debug(f"Result speed {resultspeed_kmps} written to {resultfilepath}")
 
-# Path decimal coordinates
-geolocation = []
-for img in images:
-    geolocation.append(str('{:.14f}'.format(img.get("longitude"))) + "," + str('{:.14f}'.format(img.get("latitude")) + ",0"+ "\n"))
+    # Path decimal coordinates
+    geolocation = []
+    for img in images:
+        geolocation.append(str('{:.14f}'.format(img.get("longitude"))) + "," + str('{:.14f}'.format(img.get("latitude")) + ",0"+ "\n"))
 
-geolocfilepath = "./geoloc.txt"
-with io.open(geolocfilepath, 'w') as file:
-    file.writelines(geolocation)
- 
+    geolocfilepath = "./geoloc.txt"
+    with io.open(geolocfilepath, 'w') as file:
+        file.writelines(geolocation)
+
+# entree point to execute main logic 
+if __name__ == "__main__":
+    main()
+
+ #----------------------------------------------------- Main Logic -------------------------------------------------------    
