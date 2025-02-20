@@ -1,4 +1,5 @@
 import math
+import numpy as np
 
 fl              = 5         # focal length in [mm]
 sw              = 6.287     # sendor width [mm]
@@ -28,17 +29,30 @@ def calculate_ground_sampling_distance(imagewidth_pixels: int, orbitheight_m:flo
     dw = 2* ((sw/2)/fl) * orbitheight_m #Image width footprint on the ground in [m]
     return dw*100/imagewidth_pixels 
 
+def find_closest_value(values, K):    
+     values = np.asarray(values)
+     idx = (np.abs(values - K)).argmin()
+     return idx, values[idx]
+
 #----------------------------------------------------- Main Logic -------------------------------------------------------
 def main() -> None:
-    issorbbitheight = 420000    # ISS orbit height [m]
+#    issorbbitheight = 420000    # ISS orbit height [m]
     imagewidth      = 4056      # photo width in [pixels]
-    R               = 6378137   # Radius earth in [m]    
-    gsd_cmppixel = calculate_ground_sampling_distance(imagewidth, issorbbitheight)
-    print(f'Ground sampling distance {gsd_cmppixel} in [cm per pixel] for ISS orbit {issorbbitheight} in [m]')
+    R               = 6378137   # Radius earth in [m]  
+    
+    angulardistance_m = 61044.3453799609
+    featuredistance_pixels = 489.7401280888609
 
-    # validating with an arc length = 61.044345379960895 km
-    distance_km = calculate_distance(R, 61.044345379960895) # distance between two points in [km]
-    print(f'Calculated feature distance is {100000 * distance_km/gsd_cmppixel} in [pixel]')
+    orbitlist_m = [390000, 400000, 410000, 420000, 430000]
+    calcdistances_pixels = []
+    for o in orbitlist_m:
+        calcdistances_pixels.append(calculate_distance(R, angulardistance_m) * 100/ calculate_ground_sampling_distance(imagewidth, o))
+        print(calcdistances_pixels)
+
+    list = np.vstack((np.array(orbitlist_m),np.array(calcdistances_pixels)))
+    idx, distance_pixel = find_closest_value(list[1,:], featuredistance_pixels)
+
+    print(f'Calculated feature distance is {distance_pixel} in [pixel] by orbit {orbitlist_m[idx]} in [m]')
 
 if __name__ == "__main__":
     main()
