@@ -128,7 +128,7 @@ def calculate_haversine(r: float, originAlat: float, originAlon: float, pointBla
     dlon = convert_degreeToRadian(pointBlon) - convert_degreeToRadian(originAlon)
     a = 0.5 - math.cos(dlat)/2 + math.cos(convert_degreeToRadian(originAlat)) * math.cos(convert_degreeToRadian(pointBlat)) * (1-math.cos(dlon))/2
     c = 2* math.asin(math.sqrt(a))
-    return r*c 
+    return c, r*c 
 
 def delete_files_in_directory(directory_path):
    try:
@@ -145,7 +145,7 @@ def delete_files_in_directory(directory_path):
 def main() -> None:
 
     R = 6378137   # Radius earth in [m] 
-    h = 420000    # ISS orbit height in [m]
+    H = 420000    # ISS orbit height in [m]
 
     imagerelpath = "./test"
 
@@ -192,8 +192,10 @@ def main() -> None:
         pointBlat = images[i].get("latitude")
         pointBlon = images[i].get("longitude")
 
-        arclength_m = calculate_haversine((R+h),pointAlat, pointAlon, pointBlat, pointBlon)  
+        beta, arclength_m = calculate_haversine((R),pointAlat, pointAlon, pointBlat, pointBlon)  
         images[i].update({"arclength_m": arclength_m})
+        orbitlength_m = beta * (R + H)
+        images[i].update({"orbitlength_m": orbitlength_m})
         deltatime_sec = get_time_difference(images[i-1].get("imagepath"), images[i].get("imagepath"))
         images[i].update({"deltatime_sec": deltatime_sec})
         speed_mpsec = arclength_m / deltatime_sec
@@ -206,17 +208,30 @@ def main() -> None:
     # Calculate total path length 
     k = 'arclength_m' # key
     segment_m = list(i[k] for i in images if k in i)
-    totaldistance_m = sum(segment_m)
-    logger.debug(f"The path distance is {totaldistance_m} in [m]") 
+    totalpathdistance_m = sum(segment_m)
+    logger.debug(f"The path distance is {totalpathdistance_m} in [m]") 
+
+     # Calculate total orbit length 
+    k = 'orbitlength_m' # key
+    orbitdistance_m = list(i[k] for i in images if k in i)
+    totalorbitdistances = sum(orbitdistance_m)
+    logger.debug(f"The orbit distance is {totalorbitdistances} in [m]") 
 
     # Calculate average ground speed
     k = 'speed_mpsec' # key
-    seg_speed_mpsec = list(i[k] for i in images if k in i)
-    avg_speed_mpsec = sum(seg_speed_mpsec) / len(seg_speed_mpsec)
-    logger.debug(f"The average speed is {avg_speed_mpsec/1000} in kmps") 
+    pathspeed_mpsec = list(i[k] for i in images if k in i)
+    avg_pathspeed_mpsec = sum(pathspeed_mpsec) / len(pathspeed_mpsec)
+    logger.debug(f"The average speed is {avg_pathspeed_mpsec/1000} in kmps") 
+    
+    # Calculate average orbit speed
+    k = 'deltatime_sec' # key
+    timedifferences_sec = list(i[k] for i in images if k in i)
+    totaltimedifferences_sec = sum(timedifferences_sec)
+    orbitspeed_mpsec = totalorbitdistances / totaltimedifferences_sec
+    logger.debug(f"The calculated orbit speed is {orbitspeed_mpsec/1000} in kmps") 
 
     # Calculate the period the ISS orbits
-    period = 2*math.pi*(R+h)/(avg_speed_mpsec)
+    period = 2*math.pi*(R)/(avg_pathspeed_mpsec)
     logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
 
 if __name__ == "__main__":
