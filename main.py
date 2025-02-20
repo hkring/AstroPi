@@ -1,10 +1,12 @@
 from datetime import datetime
 from logzero import logger
+import logzero
 from astro_pi_orbit import ISS
 #from picamzero import Camera
 from exif import Image
 import cv2, math, os, io
 import pandas as pd
+import numpy as np
 
 MAX_images = 15
 iss = ISS()
@@ -15,13 +17,8 @@ starttime       = datetime.now().timestamp()
 # !!!!!!!!!!!!!!!To remove only allowed during testing!!!!!!!!!!!!!!!!!!!
 imagerelpath    = "./" 
 # !!!!!!!!!!!!!!!To remove only allowed during testing!!!!!!!!!!!!!!!!!!!
-
-fl              = 5         # focal length in [mm]
-sw              = 6.287     # sendor width [mm]
-
 R   = 6378137   # Radius earth in [m] 
-H   = 420000    # ISS orbit height in [m]
-GSD = 12648     # (4056, 3040) ground sample distance in cm/pixel
+H   = 390000    # ISS orbit height in [m]
 
 # Data structure for each image instead of multiple loose variables
 # Images -> List (Dictonary)
@@ -33,6 +30,9 @@ GSD = 12648     # (4056, 3040) ground sample distance in cm/pixel
 #   + deltatime_sec (floor)        - time difference in [seconds]
 #   + ground_speed_mpsec (floor)   - ground speed in [meter per seconds]   
 images = []
+
+# Set a minimum log level
+#logzero.loglevel(logzero.DEBUG)
 
 def get_ISS_coordinates():
     '''
@@ -194,25 +194,27 @@ def find_matching_coordinates(keypoints_1, keypoints_2, matches):
     return coordinates_1, coordinates_2
 
 def calculate_mean_distance(coordinates_1, coordinates_2):
+    '''
+    Calculate the Euclidean distance from origin to a point in [pixel].
+    Remove outliers based on quantiles.   
+    '''
     merged_coordinates = list(zip(coordinates_1, coordinates_2))
     distances = []
     for coordinates in merged_coordinates:
         x_difference = coordinates[0][0] - coordinates[1][0]
         y_difference = coordinates[0][1] - coordinates[1][1]
         distances.append(math.hypot(x_difference, y_difference))
-    d = pd.Series(distances)
-    outliers = d.between(d.quantile(.05), d.quantile(.95))
-    #print(str(d[outliers].size) + "/" + str(d.size) + " data points remain.")
-    return d[outliers].mean() 
+    return calculate_mean(distances)
 
-def calculate_speed_inkmps(feature_distance, GSD, time_difference):
-    distance = feature_distance * GSD / 100000
-    speed = distance / time_difference
-    return speed
+def calculate_mean(values) -> float:
+    d = pd.Series(values)
+    outliers = d.between(d.quantile(.10), d.quantile(.90))
+    return d[outliers].mean()
 
 def calculate_ground_sampling_distance(imagewidth_pixels: int, orbitheight_m:float) -> float: 
     '''
-    Calculate the Image width footprint on the ground
+    Calculate the Image width footprint on the ground. 
+    Assuming that the focal lenght (fl) is 5mm and sensor width (sw) = 6.287mm are constant. 
 
     Args: 
         imagewidth_pixels (int): Image width in [pixels]
@@ -220,9 +222,37 @@ def calculate_ground_sampling_distance(imagewidth_pixels: int, orbitheight_m:flo
     Returns
         gsd_cmppixel (float): ground sampling distances in [cm/pixel]     
     '''
+    fl              = 5         # focal length in [mm]
+    sw              = 6.287     # sendor width [mm]
     dw = 2* ((sw/2)/fl) * orbitheight_m #Image width footprint on the ground in [m]
     return dw*100/imagewidth_pixels 
 
+def calculate_speed_inkmps(image_width, feature_distance: float , time_difference: float, K: float):
+    orbitarray_m = [390000, 400000, 410000, 420000, 430000]
+    distancearray_m = []
+    for o in orbitarray_m:
+        distancearray_m.append(feature_distance*calculate_ground_sampling_distance(image_width, o)/100)
+
+    mapdistancebyorbit = np.vstack((np.array(orbitarray_m),np.array(distancearray_m)))  
+    idx, closestdistance_m = find_closest_value(mapdistancebyorbit[1,:], K)
+    logger.debug(f'Found orbit {orbitarray_m[idx]} closest distance {closestdistance_m/1000} in km"') 
+    # todo transform to arc later !!
+    orbitdistance_m = closestdistance_m * (R + orbitarray_m[idx])/R 
+    avg_speed_kmps = orbitdistance_m/(1000*time_difference)
+    
+    return avg_speed_kmps
+
+def calculate_distance(r_m: float, acrlen_m: float) -> float:
+    '''
+    Calculate the distance between two point on an arc
+
+    Args:
+        r_m (float): arc radius in [meter]
+        arclen_m (float): arc segment length in [meter]
+    Returns:
+        d_m (float): distance in [meter      
+    '''
+    return 2*r_m*math.sin(acrlen_m/(2*r_m))
 
 def next_image(i: int) -> None:
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!    
@@ -251,11 +281,14 @@ def image_update(previousimage, thisimage) -> None:
     coordinates_1, coordinates_2 = find_matching_coordinates(keypoints_1, keypoints_2, matches)
     featuredistance_pixel = calculate_mean_distance(coordinates_1, coordinates_2)
     thisimage.update({"featuredistance_pixel": featuredistance_pixel})
-
-    speed_kmps = calculate_speed_inkmps(featuredistance_pixel, thisimage.get("gsd"), deltatime_sec)
+    speed_kmps = calculate_speed_inkmps(get_image_width(thisimage.get("imagepath")),featuredistance_pixel,deltatime_sec, angulardistance_m) 
     thisimage.update({"speed_kmps": speed_kmps})
     logger.debug(f'Extract&Calculate path section finished!')
 
+def find_closest_value(values, K):    
+     values = np.asarray(values)
+     idx = (np.abs(values - K)).argmin()
+     return idx, values[idx]   
 #----------------------------------------------------- Main Logic -------------------------------------------------------
 def main() -> None:
 
@@ -270,49 +303,53 @@ def main() -> None:
             break
         
         # get new picture every 15 seconds
-        if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 15:
+        if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 2:
             next_image(len(images))
+            lastPictureTime = datetime.now().timestamp() 
             thisimage = images[len(images)-1]
-            print(get_image_width(thisimage.get("imagepath")))
             thisimage.update({"datetime_original":get_time(thisimage.get("imagepath"))})
             thisimage.update({"latitude": get_signedLatCoordinate(thisimage.get("imagepath"))})
             thisimage.update({"longitude": get_signedLonCoordinate(thisimage.get("imagepath"))})
-            thisimage.update({"gsd": calculate_ground_sampling_distance(get_image_width(thisimage.get("imagepath")),H)})
+            #thisimage.update({"gsd": calculate_ground_sampling_distance(get_image_width(thisimage.get("imagepath")),H)})
             if (len(images) > 1):
                 previousimage = images[len(images)-2]
                 image_update(previousimage, thisimage)
-
-            lastPictureTime = datetime.now().timestamp() 
           
     # Calculate total feature distance
     k = 'featuredistance_pixel' # key
     featuredistance_pixel = list(i[k] for i in images if k in i)
 
     # Sum the distance of ALL segments
-
     totaldistance_pixels = sum(featuredistance_pixel)
-    logger.debug(f"The total feature distance is {totaldistance_pixels} in pixel") 
-    gsd = images[0].get("gsd")
-    logger.debug(f"The calculated distance is {totaldistance_pixels*gsd/100000} in km") 
-
+    logger.info(f"The total feature distance is {totaldistance_pixels} in pixel") 
+   
     k = 'angulardistance_m' # key
     angulardistance_m = list(i[k] for i in images if k in i)
     totalpathdistance_m = sum(angulardistance_m)
-    logger.debug(f"The geo path distance is {totalpathdistance_m/1000} in km") 
+    logger.info(f"The geo path distance is {totalpathdistance_m/1000} in km") 
 
-    # Average ground speed
     k = 'speed_kmps' # key
-    seg_speed_kmps = list(i[k] for i in images if k in i)
+    speed_kmps = angulardistance_m = list(i[k] for i in images if k in i)
+    avg_speed_kmps = calculate_mean(speed_kmps)
 
-    avg_speed_kmps = 0.0
-    if len(seg_speed_kmps) > 0:
-        avg_speed_kmps = sum(seg_speed_kmps) / len(seg_speed_kmps)
-    logger.debug(f"The average speed is {avg_speed_kmps} in kmps") 
-
-    period = 0.0
-    if(avg_speed_kmps > 0):
-        period = 2*math.pi*(R +H)/(1000 * avg_speed_kmps)
-    logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
+    #orbitlist_m = [390000, 400000, 410000, 420000, 430000]
+    #caldistances_m = []
+    #for o in orbitlist_m:
+    #    caldistances_m.append(totaldistance_pixels*calculate_ground_sampling_distance(imagewidth, o)/100)
+#
+    #distlist_m = np.vstack((np.array(orbitlist_m),np.array(caldistances_m)))       
+    #idx, dist_m = find_closest_value(distlist_m[1,:], totalpathdistance_m)
+    #logger.debug(f'Orbit height {orbitlist_m[idx]}, total feature distance is {dist_m/1000} in km"') 
+#
+    ## calculate average ISS speed
+    #k = 'deltatime_sec' # key
+    #deltatime_sec = list(i[k] for i in images if k in i)
+    #total_time_sec=sum(deltatime_sec)
+#
+    #orbitdistance_m = totalpathdistance_m * (R + orbitlist_m[idx])/R 
+    #logger.info(f"The orbit distance is  {orbitdistance_m/1000} in km") 
+    #avg_speed_kmps = orbitdistance_m/(1000*total_time_sec)
+    #logger.info(f"The average speed is {avg_speed_kmps} in kmps") 
 
     resultfilepath = "./result.txt"
     resultspeed_kmps = "{:.5f}".format(avg_speed_kmps)
@@ -320,6 +357,10 @@ def main() -> None:
         file.write(resultspeed_kmps)
 
     logger.debug(f"Result speed {resultspeed_kmps} written to {resultfilepath}")
+ #   period = 0.0
+ #   if(avg_speed_kmps > 0):
+ #       period = 2*math.pi*(R + orbitlist_m[idx])/(1000 * avg_speed_kmps)
+ #   logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
 
     # Path decimal coordinates
     geolocation = []
