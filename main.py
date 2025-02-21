@@ -1,23 +1,23 @@
+from pathlib import Path
 from datetime import datetime
 from logzero import logger
 import logzero
 from astro_pi_orbit import ISS
 from picamzero import Camera
 from exif import Image
-import cv2, math, os, io
+import cv2, math
 import pandas as pd
 import numpy as np
 
 MAX_images = 42
 iss = ISS()
 cam = Camera()
+
+base_folder     = Path(__file__).parent.resolve()
 duration        = 600 # main loop durtaion seconds
 starttime       = datetime.now().timestamp()
 
-imagerelpath    = "./" 
-
 R   = 6378137   # Radius earth in [m] 
-#H   = 390000    # ISS orbit height in [m]
 
 # Data structure for each image instead of multiple loose variables
 # Images -> List (Dictonary)
@@ -35,25 +35,49 @@ logzero.loglevel(logzero.INFO)
 
 def get_ISS_coordinates():
     '''
-    Retrieve the ISS coordinates degree, minutes and seconds
-    Args:
-        iss (object): astro_pi_orbit object represents ISS
-    Returns:
-        latlon (tuple): latitude, lontidtude in degree, minutes and seconds     
+    Retrieve the ISS coordinates.
+
+    returns:
+        latlon (tuple(floor)): latitude, lontidtude in degrees, minutes and seconds     
     '''
     point = iss.coordinates()
     return (point.latitude.signed_dms(), point.longitude.signed_dms())
 
-def get_image_width(image):
-     with open(image, 'rb') as image_file:
-        img = Image(image_file)
-        return img.get("image_width")
+def get_image_width(imagename: str) -> int:
+    '''
+    Read file meta data 'image_width'.
 
-def get_time(image):
-    with open(image, 'rb') as image_file:
-        img = Image(image_file)
-        time_str = img.get("datetime_original")
-        time = datetime.strptime(time_str, '%Y:%m:%d %H:%M:%S')
+    args 
+        imagename (str): filename
+    returns: 
+        width (int): or default 4056 in [pixel].
+    '''
+    width_pixel = 4056 # default
+    try:
+        with open(imagename, 'rb') as image_file:
+            img = Image(image_file)
+            width_pixel = img.get("image_width")
+    except FileNotFoundError:
+        logger.warning(f'Error {imagename} not exist. Return default: 4056')
+        return width_pixel
+
+def get_time(imagename: str) -> datetime: 
+    '''
+    Read file meta data 'datetime_original'.
+    
+    args 
+        imagename (str): filename
+    returns: 
+        width (int): or default 4056 in [pixel].
+    '''
+    try:
+        time = datetime.datetime.now()
+        with open(imagename, 'rb') as image_file:   
+            img = Image(image_file)
+            time_str = img.get("datetime_original")
+            time = datetime.strptime(time_str, '%Y:%m:%d %H:%M:%S')
+    except FileNotFoundError:
+        logger.warning(f'Error {imagename} not exist. Return now: {time})')      
         return time
 
 def get_time_difference(image_1, image_2):
@@ -66,10 +90,10 @@ def get_sign(refchar: str) -> float:
     '''
     Convert a direction character degree minutes seconds (DMS) coordinates 
 
-    Args:
+    args:
         drection (str): N, E, S or W
 
-    Returns: 
+    returns: 
         signed (float): -1.0 for N or E, 1.0 for S or W       
     '''
     match refchar:
@@ -84,10 +108,10 @@ def convert_to_degree(dms: tuple[float]) -> float:
     '''
     Convert degree minutes seconds (DMS) to decimal coordinates
 
-    Args:
+    args:
         dms (tuple[float]): degree, minute, seconds
 
-    Returns:
+    returns:
         decimal (float): coordinate not signed     
     '''
     return dms[0] + (dms[1] / 60) + (dms[2] / 3600)
@@ -130,10 +154,10 @@ def convert_degreeToRadian(degree: float) -> float:
     '''
     Convert an angle from degree to radiant units
 
-    Args:
+    args:
         degree (float): 0 - 360  
 
-    Returns:
+    returns:
         radian (float): 0 - 2*pi
     '''
     return degree * math.pi / 180
@@ -142,7 +166,7 @@ def calculate_haversine(r: float, originAlat: float, originAlon: float, pointBla
     """
     Calculate the arc length between two points on a surface of a sphere
 
-    Args:
+    args:
         r (float): radius of the sphere 
         originAlat (float): origin latitide in [decimal degree]
         originAlon (float): origin longitude in [decimal degree]
@@ -215,10 +239,10 @@ def calculate_ground_sampling_distance(imagewidth_pixels: int, orbitheight_m:flo
     Calculate the Image width footprint on the ground. 
     Assuming that the focal lenght (fl) is 5mm and sensor width (sw) = 6.287mm are constant. 
 
-    Args: 
+    args: 
         imagewidth_pixels (int): Image width in [pixels]
         orbitheight_m (float):  ISS orbit height in [meter]    
-    Returns
+    returns
         gsd_cmppixel (float): ground sampling distances in [cm/pixel]     
     '''
     fl              = 5         # focal length in [mm]
@@ -248,16 +272,16 @@ def calculate_distance(r_m: float, acrlen_m: float) -> float:
     '''
     Calculate the distance between two point on an arc
 
-    Args:
+    args:
         r_m (float): arc radius in [meter]
         arclen_m (float): arc segment length in [meter]
-    Returns:
+    returns:
         d_m (float): distance in [meter      
     '''
     return 2*r_m*math.sin(acrlen_m/(2*r_m))
 
 def next_image(i: int) -> None:
-    imagename = imagerelpath + f'gps_image{i:02d}.jpg'   
+    imagename = base_folder / f'gps_image{i:02d}.jpg'   
     cam.take_photo(imagename, get_ISS_coordinates())
     logger.info("Take a new photo " + imagename)    
     images.append({"imagepath": imagename})
@@ -316,9 +340,9 @@ def main() -> None:
     listspeed_kmps = list(i[k] for i in images if k in i)
     avgspeed_kmps = calculate_mean(listspeed_kmps)
 
-    resultfilepath = "./result.txt"
-    resultspeed_kmps = "{:.5f}".format(avgspeed_kmps)
-    with io.open(resultfilepath, 'w') as file:
+    resultfilepath = base_folder / "result.txt"
+    resultspeed_kmps = "{:.4f}".format(avgspeed_kmps)
+    with open(resultfilepath, 'w') as file:
         file.write(resultspeed_kmps)
 
     logger.info(f"Result speed {resultspeed_kmps} written to {resultfilepath}")
