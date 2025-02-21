@@ -1,4 +1,5 @@
 /photos
 /test
+*.jpg
 result.txt
 geoloc.txt

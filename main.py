@@ -8,7 +8,7 @@ import cv2, math, os, io
 import pandas as pd
 import numpy as np
 
-MAX_images = 15
+MAX_images = 42
 iss = ISS()
 cam = Camera()
 duration        = 600 # main loop durtaion seconds
@@ -17,7 +17,7 @@ starttime       = datetime.now().timestamp()
 imagerelpath    = "./" 
 
 R   = 6378137   # Radius earth in [m] 
-H   = 390000    # ISS orbit height in [m]
+#H   = 390000    # ISS orbit height in [m]
 
 # Data structure for each image instead of multiple loose variables
 # Images -> List (Dictonary)
@@ -31,7 +31,7 @@ H   = 390000    # ISS orbit height in [m]
 images = []
 
 # Set a minimum log level
-#logzero.loglevel(logzero.DEBUG)
+logzero.loglevel(logzero.INFO)
 
 def get_ISS_coordinates():
     '''
@@ -300,7 +300,7 @@ def main() -> None:
             break
         
         # get new picture every 15 seconds
-        if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 2:
+        if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 10:
             next_image(len(images))
             lastPictureTime = datetime.now().timestamp() 
             thisimage = images[len(images)-1]
@@ -321,7 +321,7 @@ def main() -> None:
     with io.open(resultfilepath, 'w') as file:
         file.write(resultspeed_kmps)
 
-    logger.debug(f"Result speed {resultspeed_kmps} written to {resultfilepath}")
+    logger.info(f"Result speed {resultspeed_kmps} written to {resultfilepath}")
 
 # entree point to execute main logic 
 if __name__ == "__main__":
