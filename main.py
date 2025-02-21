@@ -1,24 +1,53 @@
 from datetime import datetime
 from logzero import logger
+import logzero
 from astro_pi_orbit import ISS
 from picamzero import Camera
 from exif import Image
 import cv2, math, os, io
 import pandas as pd
+import numpy as np
 
+MAX_images = 15
 iss = ISS()
 cam = Camera()
-duration = 30 # seconds
-starttime = datetime.now().timestamp()
-imagerelpath = "./photos"#"./photos" #./test
+duration        = 600 # main loop durtaion seconds
+starttime       = datetime.now().timestamp()
 
-R   = 6378.137 #Radius earth in km
-#GSD = 12648    # (4056, 3040) ground sample distance in cm/pixel
-GSD = 25297    # (2028, 1520) ground sample distance in cm/pixel
+imagerelpath    = "./" 
 
-def get_gps_coordinates(iss):
+R   = 6378137   # Radius earth in [m] 
+H   = 390000    # ISS orbit height in [m]
+
+# Data structure for each image instead of multiple loose variables
+# Images -> List (Dictonary)
+#   + imagepath (string)           - file path 
+#   + datetime_original (datetime) - image capture time
+#   + latitude (floor)             - coordinate in [decimal degree] 
+#   + lontitude (floor)            - coordinate in [decimal degree}
+#   + arclength_m (floor)          - arc length between two points in [meter]
+#   + deltatime_sec (floor)        - time difference in [seconds]
+#   + ground_speed_mpsec (floor)   - ground speed in [meter per seconds]   
+images = []
+
+# Set a minimum log level
+#logzero.loglevel(logzero.DEBUG)
+
+def get_ISS_coordinates():
+    '''
+    Retrieve the ISS coordinates degree, minutes and seconds
+    Args:
+        iss (object): astro_pi_orbit object represents ISS
+    Returns:
+        latlon (tuple): latitude, lontidtude in degree, minutes and seconds     
+    '''
     point = iss.coordinates()
     return (point.latitude.signed_dms(), point.longitude.signed_dms())
+
+def get_image_width(image):
+     with open(image, 'rb') as image_file:
+        img = Image(image_file)
+        return img.get("image_width")
 
 def get_time(image):
     with open(image, 'rb') as image_file:
@@ -109,21 +138,24 @@ def convert_degreeToRadian(degree: float) -> float:
     '''
     return degree * math.pi / 180
 
-def calculate_haversine(pointAlat: float, pointAlon: float, pointBlat: float, pintBlon: float) -> float:
+def calculate_haversine(r: float, originAlat: float, originAlon: float, pointBlat: float, pointBlon: float) -> float:
     """
-    Calculate the angular distance between two points on a surface of a sphere
+    Calculate the arc length between two points on a surface of a sphere
 
     Args:
-        pointA (tuble(float)): start point
-        pointB (tuble(float)): end point
+        r (float): radius of the sphere 
+        originAlat (float): origin latitide in [decimal degree]
+        originAlon (float): origin longitude in [decimal degree]
+        pointBlat (float): point latitide in [decimal degree]
+        pointBlon (float): point longitude in [decimal degree]
 
-    return distance (float)     
+    return arc length (float)     
     """ 
-    dlat = convert_degreeToRadian(pointBlat) - convert_degreeToRadian(pointAlat)
-    dlon = convert_degreeToRadian(pintBlon) - convert_degreeToRadian(pointAlon)
-    a = 0.5 - math.cos(dlat)/2 + math.cos(convert_degreeToRadian(pointAlat)) * math.cos(convert_degreeToRadian(pointBlat)) * (1-math.cos(dlon))/2
+    dlat = convert_degreeToRadian(pointBlat) - convert_degreeToRadian(originAlat)
+    dlon = convert_degreeToRadian(pointBlon) - convert_degreeToRadian(originAlon)
+    a = 0.5 - math.cos(dlat)/2 + math.cos(convert_degreeToRadian(originAlat)) * math.cos(convert_degreeToRadian(pointBlat)) * (1-math.cos(dlon))/2
     c = 2* math.asin(math.sqrt(a))
-    return R*c 
+    return r*c 
     
 def convert_to_cv(image_1, image_2):
     image_1_cv = cv2.imread(image_1, 0)
@@ -160,138 +192,139 @@ def find_matching_coordinates(keypoints_1, keypoints_2, matches):
         coordinates_2.append((x2,y2))  
     return coordinates_1, coordinates_2
 
-
 def calculate_mean_distance(coordinates_1, coordinates_2):
+    '''
+    Calculate the Euclidean distance from origin to a point in [pixel].
+    Remove outliers based on quantiles.   
+    '''
     merged_coordinates = list(zip(coordinates_1, coordinates_2))
     distances = []
     for coordinates in merged_coordinates:
         x_difference = coordinates[0][0] - coordinates[1][0]
         y_difference = coordinates[0][1] - coordinates[1][1]
         distances.append(math.hypot(x_difference, y_difference))
-    d = pd.Series(distances)
-    outliers = d.between(d.quantile(.05), d.quantile(.95))
-    #print(str(d[outliers].size) + "/" + str(d.size) + " data points remain.")
-    return d[outliers].mean() 
+    return calculate_mean(distances)
 
-def calculate_speed_inkmps(feature_distance, GSD, time_difference):
-    distance = feature_distance * GSD / 100000
-    speed = distance / time_difference
-    return speed
+def calculate_mean(values) -> float:
+    d = pd.Series(values)
+    outliers = d.between(d.quantile(.10), d.quantile(.90))
+    return d[outliers].mean()
 
-def delete_files_in_directory(directory_path):
-   try:
-     files = os.listdir(directory_path)
-     for file in files:
-       file_path = os.path.join(directory_path, file)
-       if os.path.isfile(file_path):
-         os.remove(file_path)
-     print("All files deleted successfully.")
-   except OSError:
-     print("Error occurred while deleting files.")
+def calculate_ground_sampling_distance(imagewidth_pixels: int, orbitheight_m:float) -> float: 
+    '''
+    Calculate the Image width footprint on the ground. 
+    Assuming that the focal lenght (fl) is 5mm and sensor width (sw) = 6.287mm are constant. 
 
-# Holger comment: Defining a data structure for each image instead of multiple loose variables
-# Images -> List (Dictonary)
-#   + imagepath (string)    - file path 
-#   + latlon (tuple[floor]) - decimal coordinate
-#   + distance (floor)      - angular distance between two points   
-images = [{"imagepath":  "test/photo_0673.jpg"}] #example
-images.clear()
+    Args: 
+        imagewidth_pixels (int): Image width in [pixels]
+        orbitheight_m (float):  ISS orbit height in [meter]    
+    Returns
+        gsd_cmppixel (float): ground sampling distances in [cm/pixel]     
+    '''
+    fl              = 5         # focal length in [mm]
+    sw              = 6.287     # sendor width [mm]
+    dw = 2* ((sw/2)/fl) * orbitheight_m #Image width footprint on the ground in [m]
+    return dw*100/imagewidth_pixels 
 
-try:
-    os.mkdir(imagerelpath)
-except FileExistsError:
-    logger.warning(f"Directory '{imagerelpath}' already exists.")
-    if (imagerelpath != "./test") :
-        delete_files_in_directory(imagerelpath)
-except PermissionError:
-    logger.error(f"Permission denied: Unable to create '{imagerelpath}'.")
-    imagerelpath = ""  
+def calculate_speed_inkmps(image_width, feature_distance: float , time_difference: float, K: float):
+    '''
+    Calculates speed based on feature pixel distance. Find the approximate orbit by comparing with known value. 
+    '''
+    orbitarray_m = [390000, 400000, 410000, 420000, 430000]
+    distancearray_m = []
+    for o in orbitarray_m:
+        distancearray_m.append(feature_distance*calculate_ground_sampling_distance(image_width, o)/100)
 
-i = 1
-lastPictureTime = 0
-while datetime.now().timestamp() - starttime < duration:
+    mapdistancebyorbit = np.vstack((np.array(orbitarray_m),np.array(distancearray_m)))  
+    idx, closestdistance_m = find_closest_value(mapdistancebyorbit[1,:], K)
+    logger.debug(f'Found orbit {orbitarray_m[idx]} closest distance {closestdistance_m/1000} in km"') 
+    # todo transform to arc later !!
+    orbitdistance_m = closestdistance_m * (R + orbitarray_m[idx])/R 
+    avg_speed_kmps = orbitdistance_m/(1000*time_difference)
     
-    # get new picture every 15 seconds
-    if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 15:
-        imagename = imagerelpath + f'/gps_image{i:02d}.jpg'
-        logger.debug("Take a new shot " + imagename)
-        cam.take_photo(imagename, gps_coordinates=get_gps_coordinates(iss))
-        i += 1
-        lastPictureTime = datetime.now().timestamp()    
+    return avg_speed_kmps
 
-files = [f for f in os.listdir(imagerelpath)] 
-for f in files:
-    if imagerelpath == "":
-        images.append({"imagepath": f})
-    else:
-        images.append({"imagepath": imagerelpath + '/' + f})
+def calculate_distance(r_m: float, acrlen_m: float) -> float:
+    '''
+    Calculate the distance between two point on an arc
 
-# Holger comment: Loop over all images and extract decimal coordinates
-for img in images:
-    img.update({"datetime_original":get_time(img.get("imagepath"))})
-    img.update({"latitude": get_signedLatCoordinate(img.get("imagepath"))})
-    img.update({"longitude": get_signedLonCoordinate(img.get("imagepath"))})
+    Args:
+        r_m (float): arc radius in [meter]
+        arclen_m (float): arc segment length in [meter]
+    Returns:
+        d_m (float): distance in [meter      
+    '''
+    return 2*r_m*math.sin(acrlen_m/(2*r_m))
 
-# Holger comment: Caclulate angular distance. Start the loop with the second image but use the previous image[i-1] to extract the start point 
-for i in range(1, len(images), 1):
-    pointAlat = images[i-1].get("latitude")
-    pointAlon = images[i-1].get("longitude")
-    pointBlat = images[i].get("latitude")
-    pointBlon = images[i].get("longitude")
-    angulardistance = calculate_haversine(pointAlat, pointAlon, pointBlat, pointBlon)  
-    images[i].update({"angulardistance": angulardistance})
-    dtime = get_time_difference(images[i-1].get("imagepath"),images[i].get("imagepath"))    
-    images[i].update({"dtime": dtime})
-    image_1_cv, image_2_cv = convert_to_cv(images[i-1].get("imagepath"),images[i].get("imagepath"))
+def next_image(i: int) -> None:
+    imagename = imagerelpath + f'gps_image{i:02d}.jpg'   
+    cam.take_photo(imagename, get_ISS_coordinates())
+    logger.info("Take a new photo " + imagename)    
+    images.append({"imagepath": imagename})
+
+def image_update(previousimage, thisimage) -> None:
+    logger.debug(f'Function image_update - process section between {previousimage} and {thisimage}')
+    originAlat = previousimage.get("latitude")
+    originAlon = previousimage.get("longitude")
+    pointBlat = thisimage.get("latitude")
+    pointBlon = thisimage.get("longitude")
+    angulardistance_m = calculate_haversine((R), originAlat, originAlon, pointBlat, pointBlon)  
+    thisimage.update({"angulardistance_m": angulardistance_m})
+    deltatime_sec = get_time_difference(previousimage.get("imagepath"),thisimage.get("imagepath"))    
+    thisimage.update({"deltatime_sec": deltatime_sec})
+    image_1_cv, image_2_cv = convert_to_cv(previousimage.get("imagepath"),thisimage.get("imagepath"))
     keypoints_1, keypoints_2, descriptors_1, descriptors_2 = calculate_features(image_1_cv, image_2_cv, 1000)
     matches = calculate_matches(descriptors_1, descriptors_2)
     coordinates_1, coordinates_2 = find_matching_coordinates(keypoints_1, keypoints_2, matches)
-    pixeldistance = calculate_mean_distance(coordinates_1, coordinates_2)
-    images[i].update({"pixeldistance": pixeldistance})
-    speed = calculate_speed_inkmps(pixeldistance, GSD, dtime)
-    images[i].update({"speed": speed})
+    featuredistance_pixel = calculate_mean_distance(coordinates_1, coordinates_2)
+    thisimage.update({"featuredistance_pixel": featuredistance_pixel})
+    speed_kmps = calculate_speed_inkmps(get_image_width(thisimage.get("imagepath")),featuredistance_pixel,deltatime_sec, angulardistance_m) 
+    thisimage.update({"speed_kmps": speed_kmps})
+    logger.debug(f'Function image_update finished!')
 
-# Holger comment: calculate total path length 
-k = 'pixeldistance' # key
-pixels = list(i[k] for i in images if k in i)
+def find_closest_value(values, K):    
+     values = np.asarray(values)
+     idx = (np.abs(values - K)).argmin()
+     return idx, values[idx]   
+#----------------------------------------------------- Main Logic -------------------------------------------------------
+def main() -> None:
 
-# Holger comment: sum the distance of ALL segments
-totalpixels = sum(pixels)
-logger.debug(f"The total feature distance is {totalpixels} in pixel") 
-logger.debug(f"The calculated distance is {totalpixels*GSD/100000} in km") 
+    logger.debug('Begin Main Logic ....')
+    # read filepath from folders
+    images.clear()
 
-k = 'angulardistance' # key
-geodistance = list(i[k] for i in images if k in i)
-totalgeo = sum(geodistance)
-logger.debug(f"The geo path distance is {totalgeo} in km") 
+    lastPictureTime = 0
+    while datetime.now().timestamp() - starttime < duration:
+        # no more imgages allowed
+        if(len(images) >= MAX_images):
+            break
+        
+        # get new picture every 15 seconds
+        if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 2:
+            next_image(len(images))
+            lastPictureTime = datetime.now().timestamp() 
+            thisimage = images[len(images)-1]
+            thisimage.update({"datetime_original":get_time(thisimage.get("imagepath"))})
+            thisimage.update({"latitude": get_signedLatCoordinate(thisimage.get("imagepath"))})
+            thisimage.update({"longitude": get_signedLonCoordinate(thisimage.get("imagepath"))})
+            if (len(images) > 1):
+                previousimage = images[len(images)-2]
+                image_update(previousimage, thisimage)
+          
 
-# Holger comment: average ground speed
-k = 'speed' # key
-seg_speed = list(i[k] for i in images if k in i)
+    k = 'speed_kmps' # key
+    listspeed_kmps = list(i[k] for i in images if k in i)
+    avgspeed_kmps = calculate_mean(listspeed_kmps)
 
-avg_speed = 0.0
-if len(seg_speed) > 0:
-    avg_speed = sum(seg_speed) / len(seg_speed)
-logger.debug(f"The average speed is {avg_speed} in kmps") 
+    resultfilepath = "./result.txt"
+    resultspeed_kmps = "{:.5f}".format(avgspeed_kmps)
+    with io.open(resultfilepath, 'w') as file:
+        file.write(resultspeed_kmps)
 
-period = 0.0
-if(avg_speed > 0):
-    period = 2*math.pi*R/(avg_speed)
-logger.debug(f"The calculated ISS orbit period is {period/60:.2f} in minutes")
+    logger.debug(f"Result speed {resultspeed_kmps} written to {resultfilepath}")
 
-resultfilepath = "./result.txt"
-resultspeed = "{:.4f}".format(avg_speed)
-with io.open(resultfilepath, 'w') as file:
-    file.write(resultspeed)
+# entree point to execute main logic 
+if __name__ == "__main__":
+    main()
 
-logger.debug(f"Result speed {resultspeed} written to {resultfilepath}")
-
-# Holger comment: path decimal coordinates
-geolocation = []
-for img in images:
-    geolocation.append(str('{:.14f}'.format(img.get("longitude"))) + "," + str('{:.14f}'.format(img.get("latitude")) + ",0"+ "\n"))
-
-geolocfilepath = "./geoloc.txt"
-with io.open(geolocfilepath, 'w') as file:
-    file.writelines(geolocation)
- 
+ #----------------------------------------------------- Main Logic -------------------------------------------------------    
