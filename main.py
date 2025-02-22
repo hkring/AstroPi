@@ -50,15 +50,11 @@ def get_image_width(imagename: str) -> int:
     args 
         imagename (str): filename
     returns: 
-        width (int): or default 4056 in [pixel].
+        width (int): image_width
     '''
-    width_pixel = 4056 # default
-    try:
-        with open(imagename, 'rb') as image_file:
-            img = Image(image_file)
-            width_pixel = img.get("image_width")
-    except FileNotFoundError:
-        logger.warning(f'Error {imagename} not exist. Return default: 4056')
+    with open(imagename, 'rb') as image_file:
+        img = Image(image_file)
+        width_pixel = img.get("image_width")
         return width_pixel
 
 def get_time(imagename: str) -> datetime: 
@@ -68,16 +64,12 @@ def get_time(imagename: str) -> datetime:
     args 
         imagename (str): filename
     returns: 
-        width (int): or default 4056 in [pixel].
-    '''
-    try:
-        time = datetime.datetime.now()
-        with open(imagename, 'rb') as image_file:   
-            img = Image(image_file)
-            time_str = img.get("datetime_original")
-            time = datetime.strptime(time_str, '%Y:%m:%d %H:%M:%S')
-    except FileNotFoundError:
-        logger.warning(f'Error {imagename} not exist. Return now: {time})')      
+        time (datetime): datetime_original
+    ''' 
+    with open(imagename, 'rb') as image_file:   
+        img = Image(image_file)
+        time_str = img.get("datetime_original")
+        time = datetime.strptime(time_str, '%Y:%m:%d %H:%M:%S')
         return time
 
 def get_time_difference(image_1, image_2):
@@ -120,10 +112,10 @@ def get_signedLatCoordinate(image: str) -> float:
     """
     Read Image Meta data and returns signed decimal coordinates
 
-    Args:
+    args:
         image (string): file path to Exif Image
 
-    Returns:
+    returns:
         decimal (floor): latitude
     """
     with open(image, 'rb') as image_file:
@@ -137,10 +129,10 @@ def get_signedLonCoordinate(image: str) -> float:
     """
     Read Image Meta data and returns signed decimal coordinates
 
-    Args:
+    args:
         image (string): file path to Exif Image
 
-    Returns:
+    returns:
         decimal (floor): longitude 
     """
     with open(image, 'rb') as image_file:
@@ -164,7 +156,7 @@ def convert_degreeToRadian(degree: float) -> float:
 
 def calculate_haversine(r: float, originAlat: float, originAlon: float, pointBlat: float, pointBlon: float) -> float:
     """
-    Calculate the arc length between two points on a surface of a sphere
+    Calculate the distance between the two points along a great circle on a surface of a sphere
 
     args:
         r (float): radius of the sphere 
@@ -178,7 +170,7 @@ def calculate_haversine(r: float, originAlat: float, originAlon: float, pointBla
     dlat = convert_degreeToRadian(pointBlat) - convert_degreeToRadian(originAlat)
     dlon = convert_degreeToRadian(pointBlon) - convert_degreeToRadian(originAlon)
     a = 0.5 - math.cos(dlat)/2 + math.cos(convert_degreeToRadian(originAlat)) * math.cos(convert_degreeToRadian(pointBlat)) * (1-math.cos(dlon))/2
-    c = 2* math.asin(math.sqrt(a))
+    c = 2 * math.asin(math.sqrt(a))
     return r*c 
     
 def convert_to_cv(image_1, image_2):
@@ -196,13 +188,6 @@ def calculate_matches(descriptors_1, descriptors_2):
     brute_force = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
     matches = brute_force.match(descriptors_1, descriptors_2)
     return matches
-
-def display_matches(image_1_cv, keypoints_1, image_2_cv, keypoints_2, matches):
-    match_img = cv2.drawMatches(image_1_cv, keypoints_1, image_2_cv, keypoints_2, matches[:100], None)
-    resize = cv2.resize(match_img, (1600,600), interpolation = cv2.INTER_AREA)
-    cv2.imshow('matches', resize)
-    cv2.waitKey(0)
-    cv2.destroyWindow('matches')
 
 def find_matching_coordinates(keypoints_1, keypoints_2, matches):
     coordinates_1 = []
@@ -250,38 +235,47 @@ def calculate_ground_sampling_distance(imagewidth_pixels: int, orbitheight_m:flo
     dw = 2* ((sw/2)/fl) * orbitheight_m #Image width footprint on the ground in [m]
     return dw*100/imagewidth_pixels 
 
-def calculate_speed_inkmps(image_width, feature_distance: float , time_difference: float, K: float):
+def calculate_arclength(r: float, chordlength: float) -> float:
     '''
-    Calculates speed based on feature pixel distance. Find the approximate orbit by comparing with known value. 
-    '''
-    orbitarray_m = [390000, 400000, 410000, 420000, 430000]
-    distancearray_m = []
-    for o in orbitarray_m:
-        distancearray_m.append(feature_distance*calculate_ground_sampling_distance(image_width, o)/100)
-
-    mapdistancebyorbit = np.vstack((np.array(orbitarray_m),np.array(distancearray_m)))  
-    idx, closestdistance_m = find_closest_value(mapdistancebyorbit[1,:], K)
-    logger.debug(f'Found orbit {orbitarray_m[idx]} closest distance {closestdistance_m/1000} in km"') 
-    # todo transform to arc later !!
-    orbitdistance_m = closestdistance_m * (R + orbitarray_m[idx])/R 
-    avg_speed_kmps = orbitdistance_m/(1000*time_difference)
-    
-    return avg_speed_kmps
-
-def calculate_distance(r_m: float, acrlen_m: float) -> float:
-    '''
-    Calculate the distance between two point on an arc
+    Calculate the distance between two points 
 
     args:
-        r_m (float): arc radius in [meter]
-        arclen_m (float): arc segment length in [meter]
+        r (float): cicrle radius 
+        chordlength (float)
     returns:
-        d_m (float): distance in [meter      
+        chordlength (float)
     '''
-    return 2*r_m*math.sin(acrlen_m/(2*r_m))
+    return 2*r*math.asin(chordlength/(2*r)) 
+
+def calculate_speed_inkmps(image_width: int, feature_distance: float , time_difference: float, geo_distance: float) -> float:
+    '''
+    Identify the closest ground sampling rate based on different orbit altitudes to calculate the ISS speed.
+
+    args:
+        image_width (int): usually highest resolutiom 4056
+        feature_distance (float): length in [pixel]
+        time_difference (float): time between two images
+        geo_distance (float): length in [m]
+
+    returns:
+        speed (float): speed in [kmps]
+    '''
+    orbitarray_m = [390000, 395000, 400000, 450000, 410000, 415000, 420000, 425000, 430000, 435000]
+    array_m = []
+    for o in orbitarray_m:
+        arclength_m = calculate_arclength(R, feature_distance*calculate_ground_sampling_distance(image_width, o)/100)
+        array_m.append(arclength_m)
+
+    mapbyorbit = np.vstack((np.array(orbitarray_m),np.array(array_m)))  
+    idx, closestarclength_m = find_closest_value(mapbyorbit[1,:], geo_distance)
+    logger.debug(f'Found orbit {orbitarray_m[idx]} closest distance {closestarclength_m/1000} in km"') 
+    arclength_m = closestarclength_m * (R + orbitarray_m[idx])/R 
+    
+    return arclength_m/(1000*time_difference)
+
 
 def next_image(i: int) -> None:
-    imagename = base_folder / f'gps_image{i:02d}.jpg'   
+    imagename = str(base_folder) + f'/gps_image{i:02d}.jpg'   
     cam.take_photo(imagename, get_ISS_coordinates())
     logger.info("Take a new photo " + imagename)    
     images.append({"imagepath": imagename})
@@ -292,8 +286,8 @@ def image_update(previousimage, thisimage) -> None:
     originAlon = previousimage.get("longitude")
     pointBlat = thisimage.get("latitude")
     pointBlon = thisimage.get("longitude")
-    angulardistance_m = calculate_haversine((R), originAlat, originAlon, pointBlat, pointBlon)  
-    thisimage.update({"angulardistance_m": angulardistance_m})
+    geodistance_m = calculate_haversine((R), originAlat, originAlon, pointBlat, pointBlon)  
+    thisimage.update({"geodistance_m": geodistance_m})
     deltatime_sec = get_time_difference(previousimage.get("imagepath"),thisimage.get("imagepath"))    
     thisimage.update({"deltatime_sec": deltatime_sec})
     image_1_cv, image_2_cv = convert_to_cv(previousimage.get("imagepath"),thisimage.get("imagepath"))
@@ -302,7 +296,7 @@ def image_update(previousimage, thisimage) -> None:
     coordinates_1, coordinates_2 = find_matching_coordinates(keypoints_1, keypoints_2, matches)
     featuredistance_pixel = calculate_mean_distance(coordinates_1, coordinates_2)
     thisimage.update({"featuredistance_pixel": featuredistance_pixel})
-    speed_kmps = calculate_speed_inkmps(get_image_width(thisimage.get("imagepath")),featuredistance_pixel,deltatime_sec, angulardistance_m) 
+    speed_kmps = calculate_speed_inkmps(get_image_width(thisimage.get("imagepath")),featuredistance_pixel,deltatime_sec, geodistance_m) 
     thisimage.update({"speed_kmps": speed_kmps})
     logger.debug(f'Function image_update finished!')
 
@@ -323,7 +317,7 @@ def main() -> None:
         if(len(images) >= MAX_images):
             break
         
-        # get new picture every 15 seconds
+        # get new picture every 10 seconds
         if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 10:
             next_image(len(images))
             lastPictureTime = datetime.now().timestamp() 
