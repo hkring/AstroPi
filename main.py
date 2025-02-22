@@ -9,9 +9,11 @@ import cv2, math
 import pandas as pd
 import numpy as np
 
-MAX_images = 42
-duration        = 600 # main loop durtaion seconds
-R   = 6378137   # Radius earth in [m] 
+MAX_IMAGES    = 42
+MAX_TIME      = 600 # main loop duration in [seconds]
+DEFAULT_TIME  = 10
+DEFAULT_WIDTH = 4056  
+R             = 6378137   # Radius earth in [m]
 
 iss = ISS()
 cam = Camera()
@@ -231,12 +233,15 @@ def calculate_ground_sampling_distance(imagewidth_pixels: int, orbitheight_m:flo
     returns
         gsd_cmppixel (float): ground sampling distances in [cm/pixel]     
     '''
-    fl              = 5         # focal length in [mm]
-    sw              = 6.287     # sendor width [mm]
-    dw = 2* ((sw/2)/fl) * orbitheight_m #Image width footprint on the ground in [m]
+    if imagewidth_pixels == 0:
+        imagewidth_pixels = DEFAULT_WIDTH   # use 4056 to avoid div zeros
+
+    fl              = 5                     # focal length in [mm]
+    sw              = 6.287                 # sendor width [mm]
+    dw = 2*((sw/2)/fl) * orbitheight_m      # Image width footprint on the ground in [m]
     return dw*100/imagewidth_pixels 
 
-def calculate_arclength(r: float, chordlength: float) -> float:
+def convert_to_arclength(r: float, chordlength: float) -> float:
     '''
     Calculate the distance between two points 
 
@@ -246,34 +251,53 @@ def calculate_arclength(r: float, chordlength: float) -> float:
     returns:
         chordlength (float)
     '''
+    if r == 0:
+        r = R # use eath radius to avoid div zeros
     return 2*r*math.asin(chordlength/(2*r)) 
+
+def convert_to_chordlength(r: float, arclength: float) -> float:
+    '''
+    Calculate the distance between two points 
+
+    args:
+        r (float): cicrle radius 
+        arclength (float)
+    returns:
+        arclength (float)
+    '''
+    if r == 0:
+        r = R # use eath radius to avoid div zeros
+    return 2*r*math.sin(arclength/(2*r)) 
 
 def calculate_speed_inkmps(image_width: int, feature_distance: float , time_difference: float, geo_distance: float) -> float:
     '''
     Identify the closest ground sampling rate based on different orbit altitudes to calculate the ISS speed.
+    Scale up the ground chord to the orbit altitude and calculate the arc length  
 
     args:
         image_width (int): usually highest resolutiom 4056
-        feature_distance (float): length in [pixel]
+        feature_distance (float): chord length in [pixel]
         time_difference (float): time between two images
-        geo_distance (float): length in [m]
+        geo_distance (float): arc length in [m]
 
     returns:
         speed (float): speed in [kmps]
     '''
+    if time_difference == 0:
+        time_difference = DEFAULT_TIME # use default time to avoid devision by zeros
+
     orbitarray_m = [390000, 395000, 400000, 450000, 410000, 415000, 420000, 425000, 430000, 435000]
     array_m = []
     for o in orbitarray_m:
-        arclength_m = calculate_arclength(R, feature_distance*calculate_ground_sampling_distance(image_width, o)/100)
-        array_m.append(arclength_m)
+        length_m = feature_distance*calculate_ground_sampling_distance(image_width, o)/100
+        array_m.append(length_m)
 
     mapbyorbit = np.vstack((np.array(orbitarray_m),np.array(array_m)))  
-    idx, closestarclength_m = find_closest_value(mapbyorbit[1,:], geo_distance)
-    logger.debug(f'Found orbit {orbitarray_m[idx]} closest distance {closestarclength_m/1000} in km"') 
-    arclength_m = closestarclength_m * (R + orbitarray_m[idx])/R 
+    idx, closestlength_m = find_closest_value(mapbyorbit[1,:], convert_to_chordlength(R, geo_distance))
+    logger.debug(f'Function calculate_speed_inkmps - Found orbit {orbitarray_m[idx]} closest distance {closestlength_m/1000} in km"') 
     
-    return arclength_m/(1000*time_difference)
-
+    chordlength_m = closestlength_m * (R + orbitarray_m[idx])/R  #use similar triangle rule for scaling to ISS orbit
+    return convert_to_arclength( (R + orbitarray_m[idx]), chordlength_m)/(1000*time_difference)
 
 def next_image(i: int) -> None:
     imagename = str(base_folder) + f'/gps_image{i:02d}.jpg'   
@@ -282,8 +306,8 @@ def next_image(i: int) -> None:
     images.append({"imagepath": imagename})
 
 def image_update(previousimage, thisimage) -> None:
-    logger.debug(f'Function image_update - process section between')
-    logger.debug(f'Function image_update - previous image  {previousimage} ')
+    logger.debug(f'Function image_update - process section ...')
+    logger.debug(f'Function image_update - previous image  {previousimage.get("imagepath")} ')
     
     originAlat = previousimage.get("latitude")
     originAlon = previousimage.get("longitude")
@@ -316,13 +340,13 @@ def main() -> None:
     images.clear()
 
     lastPictureTime = 0
-    while datetime.now().timestamp() - starttime < duration:
+    while datetime.now().timestamp() - starttime < MAX_TIME:
         # no more imgages allowed
-        if(len(images) >= MAX_images):
+        if(len(images) >= MAX_IMAGES):
             break
         
         # get new picture every 10 seconds
-        if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= 10:
+        if lastPictureTime == 0 or datetime.now().timestamp() - lastPictureTime >= DEFAULT_TIME:
             next_image(len(images))
             lastPictureTime = datetime.now().timestamp() 
             thisimage = images[len(images)-1]
