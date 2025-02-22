@@ -10,24 +10,25 @@ import pandas as pd
 import numpy as np
 
 MAX_images = 42
+duration        = 600 # main loop durtaion seconds
+R   = 6378137   # Radius earth in [m] 
+
 iss = ISS()
 cam = Camera()
 
 base_folder     = Path(__file__).parent.resolve()
-duration        = 600 # main loop durtaion seconds
 starttime       = datetime.now().timestamp()
-
-R   = 6378137   # Radius earth in [m] 
 
 # Data structure for each image instead of multiple loose variables
 # Images -> List (Dictonary)
-#   + imagepath (string)           - file path 
-#   + datetime_original (datetime) - image capture time
-#   + latitude (floor)             - coordinate in [decimal degree] 
-#   + lontitude (floor)            - coordinate in [decimal degree}
-#   + arclength_m (floor)          - arc length between two points in [meter]
-#   + deltatime_sec (floor)        - time difference in [seconds]
-#   + ground_speed_mpsec (floor)   - ground speed in [meter per seconds]   
+#   + imagepath (string)            - file path 
+#   + datetime_original (datetime)  - image capture time
+#   + latitude (floor)              - coordinate in [decimal degree] 
+#   + lontitude (floor)             - coordinate in [decimal degree}
+#   + geodistance_m (floor)         - arc length between two points in [meter]
+#   + featuredistance_pixel (floor) - chord length between two points in [pixel]
+#   + deltatime_sec (floor)         - time difference in [seconds]
+#   + speed_kmps (floor)            - orbit speed in [meter per seconds]   
 images = []
 
 # Set a minimum log level
@@ -281,7 +282,9 @@ def next_image(i: int) -> None:
     images.append({"imagepath": imagename})
 
 def image_update(previousimage, thisimage) -> None:
-    logger.debug(f'Function image_update - process section between {previousimage} and {thisimage}')
+    logger.debug(f'Function image_update - process section between')
+    logger.debug(f'Function image_update - previous image  {previousimage} ')
+    
     originAlat = previousimage.get("latitude")
     originAlon = previousimage.get("longitude")
     pointBlat = thisimage.get("latitude")
@@ -298,6 +301,7 @@ def image_update(previousimage, thisimage) -> None:
     thisimage.update({"featuredistance_pixel": featuredistance_pixel})
     speed_kmps = calculate_speed_inkmps(get_image_width(thisimage.get("imagepath")),featuredistance_pixel,deltatime_sec, geodistance_m) 
     thisimage.update({"speed_kmps": speed_kmps})
+    logger.debug(f'Function image_update - and next image  {thisimage} ')
     logger.debug(f'Function image_update finished!')
 
 def find_closest_value(values, K):    
@@ -307,7 +311,7 @@ def find_closest_value(values, K):
 #----------------------------------------------------- Main Logic -------------------------------------------------------
 def main() -> None:
 
-    logger.debug('Begin Main Logic ....')
+    logger.debug('Function main started ....')
     # read filepath from folders
     images.clear()
 
@@ -339,7 +343,7 @@ def main() -> None:
     with open(resultfilepath, 'w') as file:
         file.write(resultspeed_kmps)
 
-    logger.info(f"Result speed {resultspeed_kmps} written to {resultfilepath}")
+    logger.info(f"Function main - Result speed {resultspeed_kmps} written to {resultfilepath}")
 
 # entree point to execute main logic 
 if __name__ == "__main__":
